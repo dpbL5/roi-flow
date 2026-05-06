@@ -1,0 +1,34 @@
+body {
+  width: 320px;
+  margin: 0;
+  padding: 12px;
+  color: #16201b;
+  background: #fff;
+  font: 13px/1.45 "Segoe UI", Arial, sans-serif;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+#status {
+  min-height: 80px;
+  padding: 9px;
+  border: 1px solid #d8ded9;
+  border-radius: 6px;
+  background: #f6f7f8;
+  white-space: pre-wrap;
+}
+
+button {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 10px;
+  border: 1px solid #d8ded9;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

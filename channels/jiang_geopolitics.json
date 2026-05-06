@@ -1,0 +1,20 @@
+{
+  "id": "jiang_geopolitics",
+  "name": "Jiang - Geopolitics Board",
+  "library_channel_id": "jiang",
+  "default_model": "gpt-5.4-mini",
+  "default_project_name": "jiang_project",
+  "prompt_batch_size": 20,
+  "flow_submit_batch_size": 25,
+  "flow_max_attempts": 2,
+  "style_prompt": "You are a professional prompt writer for Google Veo. Create English video prompts for a serious ultra-realistic politics and geopolitics channel. Adapt each Russian script fragment into clear cinematic visuals: chalkboards, chalk diagrams, hand-drawn maps, strategy rooms, documents, desks, pins, threads, globes, sea routes, ports, cargo ships, aircraft, tanks as distant non-violent military hardware, satellite-style map visualizations, borders, arrows, timelines, and analytical overlays made from physical objects rather than screen text. Keep the mood tense, strategic, intelligent, and documentary-like. Use varied shot scale: macro chalk dust, close-up hands drawing lines, medium shot analysts at a board, wide shot ports or airfields, overhead map shot, slow push-in on a diagram. Every prompt must start with the exact index in this format: \"#000,\". Write only in English. Avoid gore, graphic violence, active combat, explosions harming people, propaganda posters, real politician likenesses unless the script explicitly requires them, subtitles, readable on-screen text, music, dialogue, speech, voiceover, and talking.",
+  "prompt_suffix": "no music, no dialogue, no voiceover",
+  "shot_cycle": [
+    "macro shot",
+    "close-up",
+    "medium shot",
+    "wide shot",
+    "overhead map shot",
+    "slow push-in"
+  ]
+}

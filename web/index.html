@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flow Veo Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Flow Veo Studio</h1>
+        <p>Подготовка Veo-промптов и аккуратная отправка готовых пачек в Google Flow</p>
+      </div>
+      <div id="health" class="health">Проверка...</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel settings">
+        <div class="section-title">
+          <h2>Проект</h2>
+          <span id="libraryRoot"></span>
+        </div>
+
+        <div class="row two">
+          <label>
+            Канал
+            <select id="channelFolder"></select>
+          </label>
+          <label>
+            Серия
+            <select id="seriesFolder"></select>
+          </label>
+        </div>
+
+        <label>
+          Папка frames
+          <input id="projectPath" value="D:\MyChannelsIRL\erifan\18\frames" />
+        </label>
+
+        <div class="row two">
+          <label>
+            Стиль канала
+            <select id="channel"></select>
+          </label>
+          <label>
+            Модель
+            <input id="model" value="gpt-5.4-mini" />
+          </label>
+        </div>
+
+        <div class="row three compact-row">
+          <label>
+            Проект
+            <input id="projectName" value="erifan_18" />
+          </label>
+          <label>
+            С индекса
+            <input id="startIndex" type="number" value="0" min="0" />
+          </label>
+          <label>
+            Пачка
+            <input id="count" type="number" value="20" min="1" max="80" />
+          </label>
+        </div>
+
+        <div id="projectStats" class="stats">Статус проекта еще не проверен</div>
+
+        <label>
+          Промпт стиля
+          <textarea id="stylePrompt" rows="13"></textarea>
+        </label>
+
+        <div class="actions main-actions">
+          <button id="previewBtn">Проверить сценарий</button>
+          <button id="generateAllBtn" class="primary">Сгенерировать все промпты</button>
+        </div>
+
+        <div class="flow-box">
+          <div>
+            <strong>Google Flow</strong>
+            <span id="flowStatus">Браузер Flow еще не открыт</span>
+          </div>
+          <label class="inline-field flow-url-field">
+            URL проекта Flow
+            <input id="flowProjectUrl" type="text" placeholder="https://labs.google/fx/tools/flow/project/..." />
+          </label>
+          <label class="inline-field">
+            Пачка/лимит
+            <input id="flowBatchCount" type="number" value="20" min="1" max="300" />
+          </label>
+          <div class="extension-panel">
+            <div>
+              <strong>Flow Extension</strong>
+              <span id="extensionStatus">Расширение еще не подключалось</span>
+            </div>
+            <button id="extensionVisualBtn" class="primary">Сгенерировать через расширение</button>
+            <button id="extensionStopBtn">Остановить расширение</button>
+            <div id="extensionActions" class="extension-actions"></div>
+          </div>
+        </div>
+
+        <div class="hint">
+          Перед визуалом откройте нужный проект в Flow и зафиксируйте URL. Расширение сначала отправляет все промпты, потом ждет ручного запуска скачивания.
+        </div>
+
+        <pre id="status" class="status"></pre>
+      </section>
+
+      <section class="panel results">
+        <div class="results-head">
+          <h2>Результат</h2>
+          <span id="summary"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Индекс</th>
+                <th>Исходный текст</th>
+                <th>Название</th>
+                <th>Veo Prompt</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

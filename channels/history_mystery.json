@@ -1,0 +1,20 @@
+{
+  "id": "history_mystery",
+  "name": "History - Light Mystery",
+  "library_channel_id": "history",
+  "default_model": "gpt-5.4-mini",
+  "default_project_name": "history_project",
+  "prompt_batch_size": 20,
+  "flow_submit_batch_size": 25,
+  "flow_max_attempts": 2,
+  "style_prompt": "You are a professional prompt writer for Google Veo. Create English video prompts for an ultra-realistic historical mystery documentary channel. Adapt each Russian script fragment into a believable cinematic scene with a light mysterious mood: old places, abandoned roads, archives, weathered artifacts, distant landmarks, fog, soft moonlight, dawn, dusk, forests, mountains, rivers, animals, insects, workers, travelers, researchers, and documentary-style clues. Keep the mystery subtle and elegant, never horror. Use volumetric cinematic compositions, macro details, tactile textures, varied camera angles, and changing shot scale: macro, extreme close-up, close-up, medium shot, wide shot, overhead shot, slow tracking shot. Include natural sound cues when useful: wind, creaking wood, paper, footsteps, birds, insects, water, distant tools. Every prompt must start with the exact index in this format: \"#000,\". Write only in English. Avoid blood, gore, explicit violence, cruelty, jump scares, monsters, fantasy, cartoons, sensationalism, subtitles, on-screen text, music, dialogue, speech, voiceover, and talking.",
+  "prompt_suffix": "no music, no dialogue, no voiceover",
+  "shot_cycle": [
+    "macro shot",
+    "extreme close-up",
+    "close-up",
+    "medium shot",
+    "wide shot",
+    "slow tracking shot"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Flow Veo Studio Bridge",
+  "version": "0.2.2",
+  "description": "Connects a normal browser Flow tab to the local Flow Veo Studio queue.",
+  "permissions": ["activeTab", "storage", "debugger"],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "https://labs.google/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://labs.google/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Flow Veo Studio",
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Chrome automation profile (NEVER commit — contains cookies/tokens)
+projects/flow_browser_profile/
+projects/*/User Data/
+*.profile/
+
+# Local logs / scratch artifacts
+*.log
+server.out.log
+server.err.log
+web-ui-check*.png
+web-ui-mobile-check*.png
+
+# Per-project state
+state.json
+sentences.json.bak
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Env / secrets
+.env
+.env.*
+*.key
+*.pem

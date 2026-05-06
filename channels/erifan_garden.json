@@ -1,0 +1,21 @@
+{
+  "id": "erifan_garden",
+  "name": "Erifan - Russian Garden",
+  "library_channel_id": "erifan",
+  "default_model": "gpt-5.4-mini",
+  "default_project_name": "erifan_18",
+  "default_project_path": "D:\\MyChannelsIRL\\erifan\\18\\frames",
+  "prompt_batch_size": 20,
+  "flow_submit_batch_size": 25,
+  "flow_max_attempts": 2,
+  "style_prompt": "You are a professional prompt writer for Google Veo. Create English video prompts for an ultra-realistic documentary-style Russian gardening channel. All scenes must feel like one coherent video: a traditional Russian vegetable garden, summer, nature, plants, birds, insects, elderly Russian gardeners or agronomists when people are useful for the scene. Always adapt the visual scene to the meaning of the current Russian sentence. Do not translate the sentence literally. Invent a clear cinematic visual that illustrates the idea. Every prompt must start with the exact index in this format: \"#000,\". Write only in English. Keep one prompt concise but visually rich. Include calm ASMR natural sounds: leaves rustling, bees, birds, soil sounds, soft wind, water, footsteps, or garden tools when relevant. Always exclude music, dialogue, speech, voiceover, and talking. Alternate shot scale across prompts: extreme close-up, close-up, medium shot, medium-wide shot, wide shot, overhead shot. Use Russian people if people are included. Preserve a calm educational gardening mood. Avoid fantasy, cartoons, modern city, studio lighting, subtitles, and text on screen.",
+  "prompt_suffix": "no music, no dialogue, no voiceover",
+  "shot_cycle": [
+    "extreme close-up",
+    "close-up",
+    "medium shot",
+    "medium-wide shot",
+    "wide shot",
+    "overhead shot"
+  ]
+}
