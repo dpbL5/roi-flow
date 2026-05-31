@@ -1,40 +1,40 @@
 # Flow Veo Studio Bridge
 
-Unpacked browser extension for running Flow automation inside a normal user browser profile. The current working setup is Yandex Browser.
+Tiện ích trình duyệt dạng unpacked để chạy tự động hoá Flow trong profile trình duyệt thường của người dùng. Thiết lập hiện đang hoạt động là Yandex Browser.
 
-Current version: `0.2.2`.
+Phiên bản hiện tại: `0.2.2`.
 
-Install or update in Yandex Browser:
+## Cài đặt hoặc cập nhật trong Yandex Browser
 
-1. Open `browser://extensions`.
-2. Enable developer mode / `Режим разработчика`.
-3. Click load unpacked / `Загрузить распакованное расширение`.
-4. Select this `browser_extension` folder.
-5. Allow site permissions if the browser asks.
-6. After updates, reload this extension card and refresh the Flow tab with `Ctrl+R`.
+1. Mở `browser://extensions`.
+2. Bật chế độ nhà phát triển.
+3. Bấm tải tiện ích chưa đóng gói.
+4. Chọn thư mục `browser_extension` này.
+5. Cấp quyền truy cập trang web nếu trình duyệt hỏi.
+6. Sau khi cập nhật, tải lại card tiện ích này và refresh tab Flow bằng `Ctrl+R`.
 
-Runtime:
+## Khi chạy
 
-- Keep `http://127.0.0.1:8765` running.
-- Open the target Flow project tab in the browser where the extension is installed.
-- Start and stop the mode from the local Flow Veo Studio UI.
-- Use the extension popup to move from submit to download, then from download to regenerate or complete.
-- Do not touch the Flow tab while the extension is submitting/downloading.
+- Giữ `http://127.0.0.1:8765` đang chạy.
+- Mở tab dự án Flow cần xử lý trong trình duyệt đã cài tiện ích.
+- Bắt đầu và dừng chế độ này từ UI local của Flow Veo Studio.
+- Dùng popup tiện ích để chuyển từ gửi prompt sang tải xuống, rồi từ tải xuống sang tạo lại hoặc hoàn tất.
+- Không chạm vào tab Flow khi tiện ích đang gửi prompt hoặc tải xuống.
 
-Implementation notes:
+## Ghi chú triển khai
 
-- Submit uses debugger-assisted `Control+A`, `Input.insertText`, and `Enter`.
-- The extension does not click global submit/generate buttons.
-- Downloads fetch authorized media bytes in the browser extension context and send them to the local server, which writes `<frames>\clip_####.mp4`.
-- Downloader version `0.1.4+` matches media inside the nearest Flow card with exactly one `#NNN`; do not use ordinal matching between download buttons and media URLs.
-- Version `0.1.5` filters downloads to currently submitted indexes and syncs server state from existing local `clip_####.mp4` files.
-- Version `0.1.6` stops resubmitting timed-out prompts during the main queue; older submitted items stay in the Flow search/download queue, and the content script performs a project sweep roughly every 3 minutes.
-- Version `0.1.11` keeps the extension run alive when Flow shows a warning such as `We noticed some unusual activity`: the extension reports the warning, reloads the Flow page, waits 10 seconds after reload, and then continues automatically instead of stopping the job.
-- Version `0.1.14` uses Flow's current Archive action. Archive replaces the removed Delete/Trash action and does not require a confirmation dialog.
-- Version `0.1.15` archives cards while they are still visible during the scroll pass and adds a positional fallback for icon-only Archive buttons near the download/reuse controls.
-- Version `0.1.16` archives only after a newly saved download. It does not archive `skipped_existing` cards or old local `downloaded_indexes`, and processes downloads one card at a time to avoid Flow DOM lag.
-- Version `0.2.0` changes the main run shape: submit all ready prompts in batches of 25 with 1-2 second gaps and 20-30 second waits between batches, then download bottom-up, then archive only cards downloaded in that pass. Not-downloaded prompts are retried for up to 3 full cycles, then unresolved prompts are marked `failed`.
-- Version `0.2.1` disables archiving entirely. It no longer marks not-downloaded submitted cards as failed just because a scan missed them.
-- Version `0.2.2` splits the run into manual phases: submit all ready prompts first, wait for the popup button to start downloading, run up to 5 download passes, then wait for a manual regenerate or complete action. Regeneration is capped by `FLOW_EXTENSION_REGEN_MAX` (default `2`) through per-prompt `regen_count`.
-- On start, the local server revives prompts falsely failed by the retired auto-fail logic (`not_downloaded_after_cycle_*`, `final_not_generated`, `final_retry_exhausted`) back to `prompt_ready`.
-- The local server rejects exact duplicate mp4 SHA256 hashes and moves duplicate files to `_flow_veo_studio\duplicate_downloads`.
+- Gửi prompt dùng `Control+A`, `Input.insertText`, và `Enter` qua debugger.
+- Tiện ích không bấm các nút submit/generate toàn cục.
+- Tải xuống lấy media bytes có uỷ quyền trong ngữ cảnh tiện ích trình duyệt và gửi về server local, server sẽ ghi `<frames>\clip_####.mp4`.
+- Downloader phiên bản `0.1.4+` khớp media bên trong card Flow gần nhất có đúng một marker `#NNN`; không dùng cách khớp theo thứ tự giữa nút tải xuống và media URL.
+- Phiên bản `0.1.5` chỉ tải các chỉ mục đang là submitted và đồng bộ trạng thái server từ các tệp local `clip_####.mp4` đã có.
+- Phiên bản `0.1.6` dừng gửi lại prompt quá thời gian trong hàng đợi chính; các mục submitted cũ vẫn ở hàng đợi tìm/tải trong Flow, và content script quét rộng dự án khoảng 3 phút một lần.
+- Phiên bản `0.1.11` giữ phiên tiện ích tiếp tục chạy khi Flow hiện cảnh báo như `We noticed some unusual activity`: tiện ích báo server, tải lại trang Flow, chờ 10 giây sau reload, rồi tự tiếp tục thay vì dừng job.
+- Phiên bản `0.1.14` dùng thao tác Archive hiện tại của Flow. Archive thay cho Delete/Trash đã bị bỏ và không cần hộp thoại xác nhận.
+- Phiên bản `0.1.15` archive card khi chúng vẫn đang hiển thị trong lượt cuộn và thêm fallback theo vị trí cho nút Archive chỉ có icon gần các nút tải xuống/dùng lại.
+- Phiên bản `0.1.16` chỉ archive sau khi có lượt tải mới lưu thành công. Nó không archive card `skipped_existing` hoặc các `downloaded_indexes` local cũ, và xử lý tải từng card một để tránh lag DOM của Flow.
+- Phiên bản `0.2.0` đổi hình dạng vòng chạy chính: gửi toàn bộ prompt sẵn sàng theo lô 25 với khoảng nghỉ 1-2 giây giữa các lần gửi và 20-30 giây giữa các lô, sau đó tải từ dưới lên, rồi chỉ archive các card đã tải trong lượt đó. Prompt chưa tải được sẽ thử lại tối đa 3 chu kỳ đầy đủ, sau đó prompt chưa xử lý sẽ bị đánh dấu `failed`.
+- Phiên bản `0.2.1` tắt archive hoàn toàn. Nó không còn đánh dấu các card submitted chưa tải được là failed chỉ vì một lượt scan bỏ sót.
+- Phiên bản `0.2.2` tách phiên chạy thành các pha thủ công: gửi toàn bộ prompt sẵn sàng trước, chờ nút popup để bắt đầu tải xuống, chạy tối đa 5 lượt tải, rồi chờ thao tác tạo lại hoặc hoàn tất. Tạo lại bị giới hạn bởi `FLOW_EXTENSION_REGEN_MAX` (mặc định `2`) thông qua `regen_count` trên từng prompt.
+- Khi bắt đầu, server local đưa các prompt bị failed nhầm bởi logic auto-fail đã retired (`not_downloaded_after_cycle_*`, `final_not_generated`, `final_retry_exhausted`) về lại `prompt_ready`.
+- Server local từ chối hash SHA256 MP4 trùng chính xác và chuyển tệp trùng vào `_flow_veo_studio\duplicate_downloads`.

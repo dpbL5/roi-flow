@@ -65,7 +65,7 @@ class FlowAutomation:
 
     def goto(self, url: str, wait_ms: int = 5000):
         if not self.is_open and not self.try_recover_page():
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         self.page.bring_to_front()
         self._navigate_best_effort(url, wait_ms=wait_ms)
         return self.status()
@@ -95,7 +95,7 @@ class FlowAutomation:
 
     def _navigate_best_effort(self, url: str, wait_ms: int = 3000):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         try:
             self.page.bring_to_front()
         except Exception as exc:
@@ -175,7 +175,7 @@ class FlowAutomation:
         for candidate in candidates:
             if candidate and Path(candidate).exists():
                 return candidate
-        raise RuntimeError("Google Chrome executable was not found")
+        raise RuntimeError("Không tìm thấy tệp chạy Google Chrome")
 
     def _is_cdp_available(self, port: int):
         url = f"http://127.0.0.1:{port}/json/version"
@@ -195,7 +195,7 @@ class FlowAutomation:
             except Exception as exc:
                 last_error = exc
             time.sleep(0.25)
-        raise RuntimeError(f"Chrome remote debugging did not start on port {port}: {last_error}")
+        raise RuntimeError(f"Chrome remote debugging không khởi động trên cổng {port}: {last_error}")
 
     def _cdp_owner_pid(self, port: int):
         try:
@@ -249,8 +249,8 @@ class FlowAutomation:
         legacy_profile = str(self.legacy_profile_dir).lower().replace("/", "\\")
         if LEGACY_PROFILE_NAME.lower() in normalized or legacy_profile in normalized:
             raise RuntimeError(
-                "Chrome CDP port is owned by the old isolated Flow profile. "
-                "Close that Chrome window/process first, then start Chrome with start-flow-chrome.bat."
+                "Cổng Chrome CDP đang thuộc về profile Flow cô lập cũ. "
+                "Hãy đóng cửa sổ/tiến trình Chrome đó trước, rồi khởi động Chrome bằng start-flow-chrome.bat."
             )
         return {"pid": pid, "command_line": command_line}
 
@@ -278,8 +278,8 @@ class FlowAutomation:
             self.context = None
             self.page = None
             raise RuntimeError(
-                "Connected Chrome is using the old isolated Flow profile. "
-                "Close that Chrome window/process first, then start Chrome with start-flow-chrome.bat."
+                "Chrome đã kết nối đang dùng profile Flow cô lập cũ. "
+                "Hãy đóng cửa sổ/tiến trình Chrome đó trước, rồi khởi động Chrome bằng start-flow-chrome.bat."
             )
 
     def _launch_regular_chrome_cdp(self, url: str | None = None):
@@ -306,9 +306,9 @@ class FlowAutomation:
             self._wait_for_cdp(self.cdp_port)
         except Exception as exc:
             raise RuntimeError(
-                "Could not start regular Chrome with remote debugging. "
-                "Close all Chrome windows and run start-flow-chrome.bat, then try again. "
-                f"Original error: {exc}"
+                "Không thể khởi động Chrome thường với remote debugging. "
+                "Hãy đóng tất cả cửa sổ Chrome và chạy start-flow-chrome.bat, rồi thử lại. "
+                f"Lỗi gốc: {exc}"
             ) from exc
 
     def _connect_external_chrome_cdp(self, url: str | None = None):
@@ -433,7 +433,7 @@ class FlowAutomation:
 
     def reload(self, wait_ms: int = 30000):
         if not self.is_open and not self.try_recover_page():
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         try:
             self.page.bring_to_front()
             self.page.reload(wait_until="domcontentloaded", timeout=60000)
@@ -449,7 +449,7 @@ class FlowAutomation:
 
     def _first_visible(self, selectors: list[str]):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         for selector in selectors:
             loc = self.page.locator(selector)
             count = loc.count()
@@ -518,7 +518,7 @@ class FlowAutomation:
             }"""
         )
         if not token:
-            raise RuntimeError("Could not find Flow prompt input. Click the prompt box in Flow and try again.")
+            raise RuntimeError("Không tìm thấy ô nhập prompt của Flow. Hãy bấm vào ô prompt trong Flow rồi thử lại.")
         return self.page.locator(f"[data-flow-veo-prompt-input='{token}']")
 
     def _human_pause(self, min_ms: int = 120, max_ms: int = 420):
@@ -579,7 +579,7 @@ class FlowAutomation:
         prompt_input.fill(prompt, timeout=5000)
         self._human_pause(180, 520)
         if self._prompt_input_text(prompt_input).strip() != prompt.strip():
-            raise RuntimeError("Flow prompt input did not accept the prompt text")
+            raise RuntimeError("Ô prompt của Flow không nhận nội dung prompt")
 
     def _submit_from_prompt_enter(self, prompt_input):
         self._human_pause(150, 450)
@@ -590,15 +590,15 @@ class FlowAutomation:
 
     def submit_prompt(self, prompt: str, delay_seconds: float = 2.5):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         self.page.bring_to_front()
         prompt_input = self._find_prompt_input()
         self._insert_prompt_human_like(prompt_input, prompt)
         self._submit_from_prompt_enter(prompt_input)
         if self._prompt_input_text(prompt_input).strip() == prompt.strip():
             raise RuntimeError(
-                "Flow did not accept Enter submit from the bottom composer: the prompt text stayed in the input. "
-                "Stopped before marking it as submitted."
+                "Flow không nhận thao tác gửi bằng Enter từ ô nhập dưới cùng: nội dung prompt vẫn còn trong ô nhập. "
+                "Đã dừng trước khi đánh dấu submitted."
             )
         base_delay = max(1.2, min(float(delay_seconds), 4.5))
         effective_delay = random.uniform(max(1.2, base_delay - 1.3), min(4.5, base_delay + 2.0))
@@ -606,7 +606,7 @@ class FlowAutomation:
 
     def visible_flow_errors(self):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         return self.page.evaluate(
             """(unusualPatterns) => {
                 const isVisible = (el) => {
@@ -660,7 +660,7 @@ class FlowAutomation:
                 const blockers = [
                     {
                         type: 'unsupported_country',
-                        message: 'Flow is not available in this country',
+                        message: 'Flow chưa khả dụng tại quốc gia này',
                         patterns: [
                             'unsupported-country',
                             'Flow ещё не работает в вашей стране',
@@ -670,7 +670,7 @@ class FlowAutomation:
                     },
                     {
                         type: 'recaptcha_unavailable',
-                        message: 'Flow reCAPTCHA connectivity problem',
+                        message: 'Flow gặp vấn đề kết nối reCAPTCHA',
                         patterns: [
                             'Не удается связаться с сервисом reCAPTCHA',
                             'reCAPTCHA',
@@ -698,7 +698,7 @@ class FlowAutomation:
 
     def _visible_media_candidates(self):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         return self.page.evaluate(
             """() => {
                 const isVisible = (el) => {
@@ -796,11 +796,11 @@ class FlowAutomation:
             index,
         )
         if not clicked:
-            raise RuntimeError(f"Download button for #{index:03d} disappeared before click")
+            raise RuntimeError(f"Nút tải xuống cho #{index:03d} đã biến mất trước khi bấm")
 
     def _visible_retry_candidates(self):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         return self.page.evaluate(
             """() => {
                 const isVisible = (el) => {
@@ -900,13 +900,13 @@ class FlowAutomation:
                     ordinal,
                 )
                 if not clicked:
-                    raise RuntimeError("Retry button disappeared before click")
+                    raise RuntimeError("Nút thử lại đã biến mất trước khi bấm")
                 self.page.wait_for_timeout(1200)
                 results.append(
                     {
                         "index": index,
                         "status": "retried",
-                        "message": "Clicked Flow retry button.",
+                        "message": "Đã bấm nút thử lại của Flow.",
                     }
                 )
             except Exception as exc:
@@ -941,12 +941,12 @@ class FlowAutomation:
                     if name.lower().endswith((".mp4", ".mov", ".webm"))
                 ]
                 if not video_names:
-                    raise RuntimeError(f"Downloaded ZIP did not contain a video file: {raw_path}")
+                    raise RuntimeError(f"Tệp ZIP đã tải xuống không chứa tệp video: {raw_path}")
                 with archive.open(video_names[0]) as source, target.open("wb") as dest:
                     dest.write(source.read())
             return {"raw_path": str(raw_path), "container": "zip", "inner_name": video_names[0]}
 
-        raise RuntimeError(f"Downloaded file is not an MP4 or ZIP video package: {raw_path}")
+        raise RuntimeError(f"Tệp đã tải xuống không phải MP4 hoặc gói ZIP video: {raw_path}")
 
     def _save_response_as_video(self, response, target: Path, raw_path: Path):
         raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -966,12 +966,12 @@ class FlowAutomation:
                     if name.lower().endswith((".mp4", ".mov", ".webm"))
                 ]
                 if not video_names:
-                    raise RuntimeError(f"Downloaded ZIP did not contain a video file: {raw_path}")
+                    raise RuntimeError(f"Tệp ZIP đã tải xuống không chứa tệp video: {raw_path}")
                 with archive.open(video_names[0]) as source, target.open("wb") as dest:
                     dest.write(source.read())
             return {"raw_path": str(raw_path), "container": "zip_src", "inner_name": video_names[0]}
 
-        raise RuntimeError(f"Media URL did not return an MP4 or ZIP video package: {raw_path}")
+        raise RuntimeError(f"Media URL không trả về MP4 hoặc gói ZIP video: {raw_path}")
 
     def _is_mp4_file(self, path: Path):
         if not path.exists() or path.stat().st_size < 16:
@@ -982,7 +982,7 @@ class FlowAutomation:
 
     def collect_visible_indexes(self, max_scrolls: int = 30):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         self.page.bring_to_front()
         try:
             self.page.evaluate(
@@ -1060,7 +1060,7 @@ class FlowAutomation:
         max_count: int = 10,
     ):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
         self.page.bring_to_front()
         output_dir.mkdir(parents=True, exist_ok=True)
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -1097,7 +1097,7 @@ class FlowAutomation:
             try:
                 response = self.context.request.get(media_url, timeout=120000)
                 if not response.ok:
-                    raise RuntimeError(f"Media request failed: HTTP {response.status}")
+                    raise RuntimeError(f"Yêu cầu media thất bại: HTTP {response.status}")
                 saved = self._save_response_as_video(response, target, raw_path)
                 results.append(
                     {
@@ -1130,7 +1130,7 @@ class FlowAutomation:
         max_count: int = 80,
     ):
         if not self.is_open:
-            raise RuntimeError("Flow browser is not open")
+            raise RuntimeError("Trình duyệt Flow chưa mở")
 
         all_results = []
         seen_indexes = set()
@@ -1154,7 +1154,7 @@ class FlowAutomation:
                     {
                         "index": index,
                         "status": "flow_error",
-                        "error": item.get("message") or "Flow error",
+                        "error": item.get("message") or "Lỗi Flow",
                         "card_text": item.get("card_text", ""),
                     }
                 )

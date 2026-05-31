@@ -14,7 +14,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "    try { $r=Invoke-RestMethod ($url + '/api/health') -TimeoutSec 1; $ready=$true; break } catch { Start-Sleep -Milliseconds 500 }" ^
   "  }" ^
   "}" ^
-  "if ($ready) { exit 0 } else { Write-Host 'Server did not start. Run python app.py to see the error.'; exit 1 }"
+  "if ($ready) { exit 0 } else { Write-Host 'Server khong khoi dong duoc. Chay python app.py de xem loi.'; exit 1 }"
 
 if errorlevel 1 (
   pause
@@ -22,7 +22,7 @@ if errorlevel 1 (
 )
 
 if /i "%~1"=="--no-open" (
-  echo Server is ready: %URL%
+  echo Server da san sang: %URL%
   exit /b 0
 )
 

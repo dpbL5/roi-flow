@@ -16,14 +16,14 @@ if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
   set "CHROME_EXE=chrome.exe"
 )
 
-echo Starting regular Google Chrome with CDP on port %CDP_PORT%.
+echo Dang khoi dong Google Chrome thuong voi CDP tren cong %CDP_PORT%.
 echo.
-echo Important:
-echo - Close all Chrome windows before using this file.
-echo - This uses a dedicated Chrome user-data-dir:
+echo Luu y:
+echo - Dong tat ca cua so Chrome truoc khi dung file nay.
+echo - File nay dung Chrome user-data-dir rieng:
 echo   %FLOW_CHROME_USER_DATA_DIR%
-echo - Do not use the old projects\flow_browser_profile window.
-echo - Optional: pass Chrome profile directory, for example:
+echo - Khong dung cua so projects\flow_browser_profile cu.
+echo - Tuy chon: truyen thu muc profile Chrome, vi du:
 echo   start-flow-chrome.bat "Profile 1"
 echo.
 

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Flow Veo Studio Bridge",
   "version": "0.2.2",
-  "description": "Connects a normal browser Flow tab to the local Flow Veo Studio queue.",
+  "description": "Kết nối tab Flow trong trình duyệt thường với hàng đợi local của Flow Veo Studio.",
   "permissions": ["activeTab", "storage", "debugger"],
   "host_permissions": [
     "http://127.0.0.1:8765/*",

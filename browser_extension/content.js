@@ -69,7 +69,7 @@ async function playBeep(kind) {
 
   try {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) throw new Error("Web Audio is not available");
+    if (!AudioContextCtor) throw new Error("Web Audio không khả dụng");
     const context = new AudioContextCtor();
     if (context.state === "suspended") {
       await context.resume();
@@ -91,7 +91,7 @@ async function playBeep(kind) {
     await sleep(pattern.count * 330 + pattern.duration);
     await context.close();
   } catch (err) {
-    console.log(`Flow Veo audio cue: ${kind}`, err);
+    console.log(`Tín hiệu âm thanh Flow Veo: ${kind}`, err);
     document.title = `🔔 Flow Veo: ${kind}`;
   }
 }
@@ -123,7 +123,7 @@ async function handleVisibleFlowWarning(tag = "flow") {
     flowVeoLastFlowErrorAt = Date.now();
     await api("/api/extension/flow-error", errors[0]).catch(() => {});
   }
-  await logServer(`[${tag}] Flow warning detected; reloading and waiting 10 seconds.`);
+  await logServer(`[${tag}] Phát hiện cảnh báo Flow; đang tải lại và chờ 10 giây.`);
   sessionStorage.setItem(FLOW_VEO_ERROR_RELOAD_KEY, String(Date.now()));
   location.reload();
   await sleep(FLOW_VEO_ERROR_RELOAD_WAIT_MS);
@@ -217,7 +217,7 @@ function findPromptInput() {
 
 async function submitPromptText(prompt) {
   const input = findPromptInput();
-  if (!input) throw new Error("Flow prompt input was not found in this tab.");
+  if (!input) throw new Error("Không tìm thấy ô nhập prompt của Flow trong tab này.");
 
   input.scrollIntoView({ block: "center", inline: "nearest" });
   await sleep(jitter(150, 420));
@@ -226,7 +226,7 @@ async function submitPromptText(prompt) {
   await sleep(jitter(1200, 1800));
 
   if (clean(elementText(input)) === clean(prompt)) {
-    throw new Error("Flow did not submit the prompt; the text stayed in the composer.");
+    throw new Error("Flow chưa gửi prompt; nội dung vẫn còn trong ô nhập.");
   }
 }
 
@@ -244,7 +244,7 @@ async function insertPromptAndPressEnter(input, prompt) {
   try {
     const response = await chrome.runtime.sendMessage(message);
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "debugger insert failed");
+      throw new Error((response && response.error) || "debugger không chèn được prompt");
     }
   } catch (err) {
     setElementText(input, prompt);
@@ -258,7 +258,7 @@ async function pressEnterFromFocusedInput(input) {
   try {
     const response = await chrome.runtime.sendMessage({ type: "flowVeoPressEnter" });
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "debugger Enter failed");
+      throw new Error((response && response.error) || "debugger không gửi được phím Enter");
     }
     return;
   } catch (err) {
@@ -403,7 +403,7 @@ async function fetchMediaThroughExtension(mediaUrl) {
     media_url: mediaUrl,
   });
   if (!response || !response.ok) {
-    throw new Error((response && response.error) || "Extension media fetch failed");
+    throw new Error((response && response.error) || "Tiện ích không lấy được media");
   }
   return response.data_base64;
 }
@@ -422,7 +422,7 @@ async function submitPhase() {
     if ((status.counts?.prompt_ready || 0) <= 0) break;
 
     let submittedInBatch = 0;
-    await logServer(`[submit] batch ${batchNumber}: up to ${ROUND_BATCH} prompts.`);
+    await logServer(`[submit] lô ${batchNumber}: tối đa ${ROUND_BATCH} prompt.`);
 
     for (let i = 0; i < ROUND_BATCH; i += 1) {
       if (await handleVisibleFlowWarning("submit")) {
@@ -459,7 +459,7 @@ async function submitPhase() {
     }
 
     if (submittedInBatch <= 0) break;
-    await logServer(`[submit] submitted ${submittedInBatch} prompts; waiting before next batch.`);
+    await logServer(`[submit] đã gửi ${submittedInBatch} prompt; đang chờ trước lô tiếp theo.`);
     await sleep(jitter(BATCH_WAIT_MIN_MS, BATCH_WAIT_MAX_MS));
     batchNumber += 1;
   }
@@ -520,13 +520,13 @@ async function downloadCardMedia(item) {
     });
     const status = (result.downloaded || [])[0]?.status;
     if (status === "downloaded") {
-      await logServer(`Downloaded clip #${String(item.index).padStart(3, "0")} in this pass.`);
+      await logServer(`Đã tải clip #${String(item.index).padStart(3, "0")} trong lượt này.`);
       return { item, status: "downloaded" };
     }
     if (status === "skipped_existing") return { item, status: "skipped_existing" };
     return { item, status: status || "skip" };
   } catch (err) {
-    await logServer(`Download failed for #${String(item.index).padStart(3, "0")}: ${err.message || String(err)}`);
+    await logServer(`Tải xuống thất bại cho #${String(item.index).padStart(3, "0")}: ${err.message || String(err)}`);
     return { item, status: "error" };
   }
 }
@@ -546,7 +546,7 @@ async function markErrorCardsForRetry(cards, tag) {
       marked += 1;
     }
   }
-  if (marked) await logServer(`[${tag}] marked ${marked} visible error cards for retry.`);
+  if (marked) await logServer(`[${tag}] đã đánh dấu ${marked} card lỗi đang hiển thị để thử lại.`);
   return marked;
 }
 
@@ -558,7 +558,7 @@ async function downloadRound(candidateIndexes, options = {}) {
   const startedAt = Date.now();
   const tag = options.tag || "round";
 
-  await logServer(`[${tag}] bottom-up download phase started: ${candidateIndexes.size} indexes to look for.`);
+  await logServer(`[${tag}] đã bắt đầu pha tải xuống từ dưới lên: cần tìm ${candidateIndexes.size} chỉ mục.`);
 
   const target = flowScrollTarget();
   const stepSize = Math.max(600, Math.floor(window.innerHeight * 0.8));
@@ -581,10 +581,10 @@ async function downloadRound(candidateIndexes, options = {}) {
     for (const card of cards) seenDownloadIndexes.add(card.index);
     if (cards.length) {
       found += cards.length;
-      await logServer(`[${tag}] processing ${cards.length} visible cards at scroll step ${step + 1}.`);
+      await logServer(`[${tag}] đang xử lý ${cards.length} card đang hiển thị ở bước cuộn ${step + 1}.`);
       for (let i = 0; i < cards.length; i += DOWNLOAD_PARALLEL) {
         if (Date.now() - startedAt > maxMs) {
-          await logServer(`[${tag}] time limit hit at step ${step + 1}.`);
+          await logServer(`[${tag}] chạm giới hạn thời gian ở bước ${step + 1}.`);
           break;
         }
         const results = await processDownloadBatch(cards.slice(i, i + DOWNLOAD_PARALLEL));
@@ -617,10 +617,10 @@ async function downloadRound(candidateIndexes, options = {}) {
   }
 
   if (!found) {
-    await logServer(`[${tag}] no matching cards found in Flow.`);
+    await logServer(`[${tag}] không tìm thấy card khớp trong Flow.`);
   }
 
-  await logServer(`[${tag}] phase complete: downloaded ${downloadedThisPass.size}, marked_errors ${errorMarked}.`);
+  await logServer(`[${tag}] hoàn tất pha: đã tải ${downloadedThisPass.size}, đã đánh dấu lỗi ${errorMarked}.`);
   return downloadedThisPass.size;
 }
 
@@ -637,7 +637,7 @@ async function downloadPhase() {
     const candidateIndexes = unresolvedIndexesFromStatus(status);
     if (!candidateIndexes.size) break;
 
-    await logServer(`[download] pass ${pass}/${MAX_DOWNLOAD_PASSES}: looking for ${candidateIndexes.size} unresolved prompt(s).`);
+    await logServer(`[download] lượt ${pass}/${MAX_DOWNLOAD_PASSES}: đang tìm ${candidateIndexes.size} prompt chưa xử lý.`);
     await downloadRound(candidateIndexes, {
       tag: `download-${pass}`,
       maxMs: PASS_MAX_MS,
@@ -657,7 +657,7 @@ async function downloadPhase() {
       flowVeoLoopLastProgressAt = Date.now();
     }
     if (stagnantPasses >= 2) {
-      await logServer("[download] stopping after 2 consecutive passes without download progress.");
+      await logServer("[download] dừng sau 2 lượt liên tiếp không có tiến triển tải xuống.");
       break;
     }
     previousDownloaded = downloadedNow;
@@ -707,7 +707,7 @@ async function flowVeoLoop() {
 
       if (!sameFlowProject(location.href, status.flow_project_url || "")) {
         await api("/api/extension/flow-error", {
-          message: `Wrong Flow project tab: ${location.href}`,
+          message: `Sai tab dự án Flow: ${location.href}`,
         });
         break;
       }
@@ -768,12 +768,12 @@ async function heartbeat() {
       Date.now() - flowVeoLoopLastProgressAt > LOOP_STALE_SUBMIT_MS
     );
     if (staleSubmitLoop) {
-      await logServer("[watchdog] submit phase stalled in the Flow tab; restarting content loop.");
+      await logServer("[watchdog] pha gửi prompt bị đứng trong tab Flow; khởi động lại vòng lặp content.");
       flowVeoLoopRunning = false;
     }
     if (status.status === "running") flowVeoLoop();
   } catch (err) {
-    /* Local server may be closed. */
+    /* Server local có thể đang đóng. */
   }
 }
 

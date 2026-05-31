@@ -87,7 +87,7 @@ async function fetchMediaAsBase64(mediaUrl) {
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(`media HTTP ${response.status}`);
+    throw new Error(`Media trả về HTTP ${response.status}`);
   }
   const buffer = await response.arrayBuffer();
   return {
@@ -109,7 +109,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   const tabId = sender.tab && sender.tab.id;
   if (!tabId) {
-    sendResponse({ ok: false, error: "No sender tab." });
+    sendResponse({ ok: false, error: "Không có tab gửi yêu cầu." });
     return false;
   }
 

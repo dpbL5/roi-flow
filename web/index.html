@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="vi">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -10,115 +10,160 @@
     <header class="topbar">
       <div>
         <h1>Flow Veo Studio</h1>
-        <p>Подготовка Veo-промптов и аккуратная отправка готовых пачек в Google Flow</p>
+        <p>Chuẩn bị prompt Veo và điều phối quá trình tạo video bằng nhà cung cấp visual</p>
       </div>
-      <div id="health" class="health">Проверка...</div>
+      <div id="health" class="health">Đang kiểm tra...</div>
     </header>
 
     <main class="layout">
       <section class="panel settings">
         <div class="section-title">
-          <h2>Проект</h2>
+          <h2>Dự án</h2>
           <span id="libraryRoot"></span>
         </div>
 
-        <div class="row two">
-          <label>
-            Канал
-            <select id="channelFolder"></select>
-          </label>
-          <label>
-            Серия
-            <select id="seriesFolder"></select>
-          </label>
-        </div>
-
-        <label>
-          Папка frames
-          <input id="projectPath" value="D:\MyChannelsIRL\erifan\18\frames" />
-        </label>
-
-        <div class="row two">
-          <label>
-            Стиль канала
-            <select id="channel"></select>
-          </label>
-          <label>
-            Модель
-            <input id="model" value="gpt-5.4-mini" />
-          </label>
-        </div>
-
-        <div class="row three compact-row">
-          <label>
-            Проект
-            <input id="projectName" value="erifan_18" />
-          </label>
-          <label>
-            С индекса
-            <input id="startIndex" type="number" value="0" min="0" />
-          </label>
-          <label>
-            Пачка
-            <input id="count" type="number" value="20" min="1" max="80" />
-          </label>
-        </div>
-
-        <div id="projectStats" class="stats">Статус проекта еще не проверен</div>
-
-        <label>
-          Промпт стиля
-          <textarea id="stylePrompt" rows="13"></textarea>
-        </label>
-
-        <div class="actions main-actions">
-          <button id="previewBtn">Проверить сценарий</button>
-          <button id="generateAllBtn" class="primary">Сгенерировать все промпты</button>
-        </div>
-
-        <div class="flow-box">
-          <div>
-            <strong>Google Flow</strong>
-            <span id="flowStatus">Браузер Flow еще не открыт</span>
+        <div class="section-block">
+          <div class="section-heading">
+            <h3>1. Chọn nội dung</h3>
+            <p>Chọn kênh và series, app sẽ tự trỏ tới thư mục frames tương ứng.</p>
           </div>
-          <label class="inline-field flow-url-field">
-            URL проекта Flow
-            <input id="flowProjectUrl" type="text" placeholder="https://labs.google/fx/tools/flow/project/..." />
+
+          <div class="row two">
+            <label>
+              Kênh
+              <select id="channelFolder"></select>
+            </label>
+            <label>
+              Series
+              <select id="seriesFolder"></select>
+            </label>
+          </div>
+
+          <label>
+            Thư mục frames
+            <input id="projectPath" value="D:\MyChannelsIRL\erifan\18\frames" />
           </label>
-          <label class="inline-field">
-            Пачка/лимит
-            <input id="flowBatchCount" type="number" value="20" min="1" max="300" />
-          </label>
-          <div class="extension-panel">
-            <div>
-              <strong>Flow Extension</strong>
-              <span id="extensionStatus">Расширение еще не подключалось</span>
+
+          <div id="projectStats" class="stats">Chưa kiểm tra trạng thái dự án</div>
+        </div>
+
+        <div class="section-block">
+          <div class="section-heading">
+            <h3>2. Chuẩn bị prompt</h3>
+            <p>Soạn kịch bản ngay trong app, sau đó kiểm tra và tạo các prompt còn thiếu.</p>
+          </div>
+
+          <div class="script-editor">
+            <div class="script-toolbar">
+              <button id="loadScriptBtn">Tải kịch bản</button>
+              <button id="saveScriptBtn">Lưu kịch bản</button>
             </div>
-            <button id="extensionVisualBtn" class="primary">Сгенерировать через расширение</button>
-            <button id="extensionStopBtn">Остановить расширение</button>
-            <div id="extensionActions" class="extension-actions"></div>
+            <label>
+              Kịch bản
+              <textarea id="scriptEditor" rows="8" placeholder="Mỗi dòng là một đoạn kịch bản. Khi lưu, app sẽ tự tạo sentences.json trong thư mục frames."></textarea>
+            </label>
+            <div id="scriptInfo" class="mini-info">Bạn có thể tải kịch bản hiện có hoặc dán nội dung mới vào đây.</div>
+          </div>
+
+          <div class="actions main-actions">
+            <button id="previewBtn">Kiểm tra kịch bản</button>
+            <button id="generateAllBtn" class="primary">Tạo tất cả prompt</button>
           </div>
         </div>
 
-        <div class="hint">
-          Перед визуалом откройте нужный проект в Flow и зафиксируйте URL. Расширение сначала отправляет все промпты, потом ждет ручного запуска скачивания.
+        <div class="section-block">
+          <div class="section-heading">
+            <h3>3. Tạo video</h3>
+            <p>Google Flow đang là nhà cung cấp hoạt động. Các nhà cung cấp khác được chuẩn bị cho bước mở rộng sau.</p>
+          </div>
+
+          <label>
+            Nhà cung cấp visual
+            <select id="visualProvider"></select>
+          </label>
+          <div id="providerStatus" class="provider-status"></div>
+
+          <div class="flow-box">
+            <div>
+              <strong>Google Flow</strong>
+              <span id="flowStatus">Trình duyệt Flow chưa được mở</span>
+            </div>
+            <label class="inline-field flow-url-field">
+              URL dự án Flow
+              <input id="flowProjectUrl" type="text" placeholder="https://labs.google/fx/tools/flow/project/..." />
+            </label>
+            <div class="extension-panel">
+              <div>
+                <strong>Tiện ích Flow</strong>
+                <span id="extensionStatus">Tiện ích chưa kết nối</span>
+              </div>
+              <button id="extensionVisualBtn" class="primary">Tạo qua tiện ích</button>
+              <button id="extensionStopBtn">Dừng tiện ích</button>
+              <div id="extensionActions" class="extension-actions"></div>
+            </div>
+          </div>
+
+          <div class="hint">
+            Trước khi tạo video, hãy mở đúng dự án trong Flow và lưu URL. Tiện ích sẽ gửi tất cả prompt trước, sau đó chờ bạn khởi động bước tải xuống thủ công.
+          </div>
         </div>
+
+        <details class="advanced-panel">
+          <summary>Thiết lập nâng cao</summary>
+          <div class="advanced-content">
+            <div class="row two">
+              <label>
+                Phong cách kênh
+                <select id="channel"></select>
+              </label>
+              <label>
+                Mô hình prompt
+                <input id="model" value="gpt-5.4-mini" />
+              </label>
+            </div>
+
+            <div class="row three compact-row">
+              <label>
+                Tên dự án
+                <input id="projectName" value="erifan_18" />
+              </label>
+              <label>
+                Từ chỉ mục
+                <input id="startIndex" type="number" value="0" min="0" />
+              </label>
+              <label>
+                Lô prompt
+                <input id="count" type="number" value="20" min="1" max="80" />
+              </label>
+            </div>
+
+            <label>
+              Giới hạn lô visual
+              <input id="flowBatchCount" type="number" value="20" min="1" max="300" />
+            </label>
+
+            <label>
+              Prompt phong cách
+              <textarea id="stylePrompt" rows="13"></textarea>
+            </label>
+          </div>
+        </details>
 
         <pre id="status" class="status"></pre>
       </section>
 
       <section class="panel results">
         <div class="results-head">
-          <h2>Результат</h2>
+          <h2>Kết quả</h2>
           <span id="summary"></span>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Индекс</th>
-                <th>Исходный текст</th>
-                <th>Название</th>
+                <th>Chỉ mục</th>
+                <th>Văn bản gốc</th>
+                <th>Tiêu đề</th>
                 <th>Veo Prompt</th>
               </tr>
             </thead>

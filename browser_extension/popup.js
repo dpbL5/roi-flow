@@ -1,6 +1,37 @@
 const API = "http://127.0.0.1:8765";
 let refreshTimer = null;
 
+const statusLabels = {
+  idle: "Đang chờ",
+  running: "Đang chạy",
+  paused: "Tạm dừng",
+  completed: "Hoàn tất",
+  stopped: "Đã dừng",
+  stopping: "Đang dừng",
+  error: "Lỗi",
+};
+
+const phaseLabels = {
+  idle: "Đang chờ",
+  waiting_for_flow_tab: "Chờ tab Flow",
+  submitting: "Đang gửi prompt",
+  awaiting_download: "Chờ tải xuống",
+  downloading: "Đang tải xuống",
+  awaiting_regen: "Chờ tạo lại",
+  flow_error_wait: "Chờ cảnh báo Flow biến mất",
+  wrong_project: "Sai dự án Flow",
+  completed: "Hoàn tất",
+  stopped: "Đã dừng",
+};
+
+function statusLabel(value) {
+  return statusLabels[value] || value || "Đang chờ";
+}
+
+function phaseLabel(value) {
+  return phaseLabels[value] || value || "Đang chờ";
+}
+
 function actionButton(label, action) {
   const button = document.createElement("button");
   button.type = "button";
@@ -18,7 +49,7 @@ function actionButton(label, action) {
       await loadStatus();
     } catch (err) {
       const el = document.getElementById("status");
-      el.textContent = `Ошибка действия:\n${err.message}`;
+      el.textContent = `Lỗi thao tác:\n${err.message}`;
     } finally {
       button.disabled = false;
     }
@@ -31,19 +62,19 @@ function renderActions(data) {
   actions.replaceChildren();
 
   if (data.pending_action === "start_download") {
-    actions.appendChild(actionButton("▶ Начать скачивание", "start_download"));
+    actions.appendChild(actionButton("▶ Bắt đầu tải xuống", "start_download"));
     return;
   }
 
   if (data.pending_action === "start_regen") {
     const count = data.unresolved?.regenerable_count ?? 0;
-    actions.appendChild(actionButton(`🔄 Регенерировать ${count}`, "start_regen"));
-    actions.appendChild(actionButton("✓ Завершить", "complete"));
+    actions.appendChild(actionButton(`🔄 Tạo lại ${count}`, "start_regen"));
+    actions.appendChild(actionButton("✓ Hoàn tất", "complete"));
     return;
   }
 
   if (data.pending_action === "complete") {
-    actions.appendChild(actionButton("✓ Завершить", "complete"));
+    actions.appendChild(actionButton("✓ Hoàn tất", "complete"));
   }
 }
 
@@ -55,15 +86,15 @@ async function loadStatus() {
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     const counts = data.counts || {};
     el.textContent = [
-      `Статус: ${data.status || "idle"}`,
-      `Фаза: ${data.phase || "idle"}`,
+      `Trạng thái: ${statusLabel(data.status)}`,
+      `Pha: ${phaseLabel(data.phase)}`,
       data.message || "",
-      `ready: ${counts.prompt_ready ?? 0}, submitted: ${counts.submitted ?? 0}, downloaded: ${counts.downloaded ?? 0}`,
-      data.project_path ? `frames: ${data.project_path}` : "Проект не выбран в локальном UI.",
+      `sẵn sàng: ${counts.prompt_ready ?? 0}, đã gửi: ${counts.submitted ?? 0}, đã tải: ${counts.downloaded ?? 0}`,
+      data.project_path ? `frames: ${data.project_path}` : "Chưa chọn dự án trong UI local.",
     ].filter(Boolean).join("\n");
     renderActions(data);
   } catch (err) {
-    el.textContent = `Локальный сервер недоступен:\n${err.message}`;
+    el.textContent = `Server local không khả dụng:\n${err.message}`;
     document.getElementById("actions").replaceChildren();
   }
 }

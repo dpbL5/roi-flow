@@ -30,34 +30,34 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("FLOW_VEO_PORT", "8765"))
 FLOW = FlowAutomation(ROOT)
 VISUAL_JOB_LOCK = threading.RLock()
-PHASE_LABELS_RU = {
-    "idle": "Простой",
-    "starting": "Запуск",
-    "open_flow": "Открываем Flow",
-    "queue": "Проверка очереди",
-    "download": "Скачиваем уже отправленные клипы",
-    "submit": "Отправляем новую пачку промптов",
-    "wait_after_submit": "Ждем готовности новой пачки",
-    "flow_recovery": "Перезагрузка Flow после блокировки",
-    "flow_error": "Flow заблокирован (unusual activity)",
-    "download_timeout": "Скачивание не успевает",
-    "submit_empty": "Flow не принял новую пачку",
-    "browser_closed": "Окно Flow закрыто",
-    "wrong_project": "Открыт не тот проект Flow",
-    "completed": "Готово",
-    "stopped": "Остановлено пользователем",
-    "stopping": "Останавливаем",
-    "error": "Ошибка",
+PHASE_LABELS_VI = {
+    "idle": "Đang chờ",
+    "starting": "Đang khởi động",
+    "open_flow": "Đang mở Flow",
+    "queue": "Đang kiểm tra hàng đợi",
+    "download": "Đang tải các clip đã gửi",
+    "submit": "Đang gửi lô prompt mới",
+    "wait_after_submit": "Đang chờ lô mới sẵn sàng",
+    "flow_recovery": "Đang tải lại Flow sau cảnh báo",
+    "flow_error": "Flow bị chặn bởi cảnh báo unusual activity",
+    "download_timeout": "Tải xuống chưa kịp hoàn tất",
+    "submit_empty": "Flow không nhận lô prompt mới",
+    "browser_closed": "Cửa sổ Flow đã đóng",
+    "wrong_project": "Đang mở sai dự án Flow",
+    "completed": "Hoàn tất",
+    "stopped": "Đã dừng bởi người dùng",
+    "stopping": "Đang dừng",
+    "error": "Lỗi",
 }
-PHASE_NEXT_ACTIONS_RU = {
-    "flow_error": "Откройте окно Flow вручную, дождитесь, пока пропадёт «unusual activity», и снова нажмите «Сгенерировать визуал».",
-    "browser_closed": "Нажмите «Открыть Flow», войдите в Google если попросит, затем снова нажмите «Сгенерировать визуал».",
-    "download_timeout": "Подождите 1-2 минуты, чтобы Flow доделал клипы, и снова нажмите «Сгенерировать визуал».",
-    "submit_empty": "Откройте Flow и проверьте, что промпт-бокс активен, потом нажмите «Сгенерировать визуал» снова.",
-    "wrong_project": "Откройте нужный проект внутри Flow, нажмите «Зафиксировать текущий URL», затем снова «Сгенерировать визуал».",
-    "completed": "Все промпты обработаны. Можно проверить папку clips_dir.",
-    "stopped": "Можно снова запустить «Сгенерировать визуал», когда будете готовы.",
-    "error": "Проверьте visual_worker.err.log в _flow_veo_studio и снова нажмите «Сгенерировать визуал».",
+PHASE_NEXT_ACTIONS_VI = {
+    "flow_error": "Mở cửa sổ Flow thủ công, chờ cảnh báo unusual activity biến mất, rồi chạy lại chế độ tạo visual.",
+    "browser_closed": "Mở lại Flow, đăng nhập Google nếu được yêu cầu, rồi chạy lại chế độ tạo visual.",
+    "download_timeout": "Chờ 1-2 phút để Flow hoàn tất clip, rồi chạy lại chế độ tạo visual.",
+    "submit_empty": "Mở Flow và kiểm tra ô nhập prompt đang hoạt động, sau đó chạy lại chế độ tạo visual.",
+    "wrong_project": "Mở đúng dự án trong Flow, lưu lại URL dự án, rồi chạy lại chế độ tạo visual.",
+    "completed": "Tất cả prompt đã được xử lý. Bạn có thể kiểm tra thư mục clips_dir.",
+    "stopped": "Có thể chạy lại chế độ tạo visual khi sẵn sàng.",
+    "error": "Kiểm tra visual_worker.err.log trong _flow_veo_studio rồi chạy lại chế độ tạo visual.",
 }
 
 
@@ -66,7 +66,7 @@ def normalize_flow_url(url: str) -> str:
         return ""
     base = str(url).strip().split("?", 1)[0].split("#", 1)[0]
     base = base.rstrip("/")
-    # Flow вставляет локаль /ru/, /en/, /uk/ и т.п. между /fx/ и /tools — убираем её для сравнения.
+    # Flow can insert locale segments such as /ru/, /en/, or /uk/ between /fx/ and /tools.
     base = re.sub(r"(/fx)/[a-z]{2}(?=/tools)", r"\1", base)
     return base
 
@@ -93,7 +93,7 @@ def require_flow_project_url(url: str | None) -> str:
     clean_url = clean_flow_project_url(raw_url)
     if raw_url and not clean_url:
         raise ValueError(
-            "URL проекта Flow должен быть ссылкой на конкретный проект: "
+            "URL dự án Flow phải là liên kết tới một dự án cụ thể: "
             "https://labs.google/fx/ru/tools/flow/project/{id}"
         )
     return clean_url
@@ -122,9 +122,9 @@ def ensure_on_flow_project(flow: FlowAutomation, expected_url: str) -> bool:
 VISUAL_JOB = {
     "status": "idle",
     "phase": "idle",
-    "phase_label": PHASE_LABELS_RU["idle"],
+    "phase_label": PHASE_LABELS_VI["idle"],
     "next_action": "",
-    "message": "Visual automation is idle.",
+    "message": "Tự động hoá visual đang chờ.",
     "project_path": None,
     "flow_project_url": None,
     "batch_count": 30,
@@ -143,7 +143,7 @@ EXTENSION_RUN_LOCK = threading.RLock()
 EXTENSION_RUN = {
     "status": "idle",
     "phase": "idle",
-    "message": "Extension visual mode is idle.",
+    "message": "Chế độ visual bằng tiện ích đang chờ.",
     "project_path": None,
     "flow_project_url": None,
     "batch_count": 30,
@@ -431,17 +431,71 @@ def load_sentences(path_value: str):
     project = resolve_frames_project(path_value)
     path = project["sentences_path"]
     if not path.exists():
-        raise FileNotFoundError(f"Sentences file not found: {path}")
+        raise FileNotFoundError(f"Không tìm thấy tệp sentences.json: {path}")
     data = read_json(path)
     if not isinstance(data, list):
-        raise ValueError("sentences.json must be an array")
+        raise ValueError("sentences.json phải là một mảng")
 
     normalized = []
     for item in data:
         if not isinstance(item, dict) or "index" not in item or "text" not in item:
-            raise ValueError("Each sentence item must contain index and text")
+            raise ValueError("Mỗi mục trong sentences.json phải có index và text")
         normalized.append({"index": int(item["index"]), "text": str(item["text"])})
     return normalized
+
+
+def sentence_items_to_text(items) -> str:
+    return "\n".join(str(item.get("text", "")).strip() for item in items if str(item.get("text", "")).strip())
+
+
+def parse_sentence_text(script_text: str):
+    lines = [line.strip() for line in (script_text or "").splitlines()]
+    fragments = [line for line in lines if line]
+    if not fragments:
+        raise ValueError("Kịch bản trống. Hãy nhập ít nhất một đoạn.")
+    return [{"index": index, "text": text} for index, text in enumerate(fragments)]
+
+
+def load_script_for_editor(path_value: str):
+    project = resolve_frames_project(path_value)
+    path = project["sentences_path"]
+    if not path.exists():
+        return {
+            "exists": False,
+            "items": [],
+            "script_text": "",
+            "frames_dir": str(project["frames_dir"]),
+            "sentences_path": str(path),
+        }
+    items = load_sentences(path_value)
+    return {
+        "exists": True,
+        "items": items,
+        "script_text": sentence_items_to_text(items),
+        "frames_dir": str(project["frames_dir"]),
+        "sentences_path": str(path),
+    }
+
+
+def save_script_from_editor(path_value: str, script_text: str):
+    project = resolve_frames_project(path_value)
+    path = project["sentences_path"]
+    items = parse_sentence_text(script_text)
+    backup_path = None
+    if path.exists():
+        backup_path = project["work_dir"] / f"sentences.before_gui_save_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        backup_path.write_text(path.read_text(encoding="utf-8-sig"), encoding="utf-8")
+    write_json(path, items)
+    return {
+        "ok": True,
+        "items": items,
+        "total": len(items),
+        "script_text": sentence_items_to_text(items),
+        "frames_dir": str(project["frames_dir"]),
+        "sentences_path": str(path),
+        "backup_path": str(backup_path) if backup_path else "",
+    }
 
 
 def load_existing_prompts(path_value: str):
@@ -451,7 +505,7 @@ def load_existing_prompts(path_value: str):
         return []
     data = read_json(prompts_path)
     if not isinstance(data, list):
-        raise ValueError(f"Prompts file must be an array: {prompts_path}")
+        raise ValueError(f"Tệp prompt phải là một mảng: {prompts_path}")
     return data
 
 
@@ -575,7 +629,7 @@ def openai_extract_text(response_data):
 def call_openai(model: str, system_prompt: str, user_prompt: str):
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set in Windows environment variables")
+        raise RuntimeError("Chưa thiết lập OPENAI_API_KEY trong biến môi trường Windows")
 
     schema = {
         "type": "object",
@@ -629,11 +683,11 @@ def call_openai(model: str, system_prompt: str, user_prompt: str):
             data = json.loads(resp.read().decode("utf-8"))
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI API error {exc.code}: {detail}") from exc
+        raise RuntimeError(f"Lỗi OpenAI API {exc.code}: {detail}") from exc
 
     output_text = openai_extract_text(data)
     if not output_text:
-        raise RuntimeError(f"OpenAI response did not contain output text: {data}")
+        raise RuntimeError(f"Phản hồi OpenAI không có output text: {data}")
     return json.loads(output_text)
 
 
@@ -909,7 +963,7 @@ def start_extension_run(project_path: str, batch_count: int, flow_project_url: s
     visual_snapshot = visual_job_snapshot()
     if visual_snapshot_is_active(visual_snapshot):
         raise RuntimeError(
-            "The Chrome/CDP visual worker is active. Stop it before starting the extension visual mode."
+            "Visual worker Chrome/CDP đang hoạt động. Hãy dừng nó trước khi khởi động chế độ tiện ích."
         )
     if flow_project_url:
         save_flow_project_url(project_path, flow_project_url)
@@ -920,7 +974,7 @@ def start_extension_run(project_path: str, batch_count: int, flow_project_url: s
             {
                 "status": "running",
                 "phase": "waiting_for_flow_tab",
-                "message": "Extension visual mode started. Open Flow in your normal browser tab.",
+                "message": "Đã khởi động chế độ visual bằng tiện ích. Hãy mở Flow trong tab trình duyệt thường.",
                 "project_path": project_path,
                 "flow_project_url": flow_project_url or saved_flow_project_url(project_path) or "",
                 "batch_count": max(1, int(batch_count)),
@@ -940,7 +994,7 @@ def start_extension_run(project_path: str, batch_count: int, flow_project_url: s
         )
         extension_add_log_unlocked(EXTENSION_RUN["message"])
         if revived:
-            extension_add_log_unlocked(f"Revived {len(revived)} auto-failed prompt(s) for another extension pass.")
+            extension_add_log_unlocked(f"Đã đưa {len(revived)} prompt từng bị auto-failed về lại lượt chạy tiện ích mới.")
         return extension_snapshot()
 
 
@@ -953,7 +1007,7 @@ def stop_extension_run():
         pending_action=None,
         resume_phase=None,
         finished_at=utc_now(),
-        message="Extension visual mode stopped.",
+        message="Đã dừng chế độ visual bằng tiện ích.",
     )
 
 
@@ -969,23 +1023,23 @@ def connect_extension_tab(tab_url: str, user_agent: str = ""):
     if status == "paused" and previous_phase == "flow_error":
         updates["status"] = "running"
         updates["phase"] = "submitting"
-        updates["message"] = "Extension reconnected after a Flow warning; continuing without starting the old browser worker."
+        updates["message"] = "Tiện ích đã kết nối lại sau cảnh báo Flow; tiếp tục mà không khởi động worker trình duyệt cũ."
     if status == "running" and previous_phase == "flow_error_wait":
         updates["phase"] = EXTENSION_RUN.get("resume_phase") or "submitting"
         updates["resume_phase"] = None
-        updates["message"] = "Extension reconnected after a Flow warning; resuming the current phase."
+        updates["message"] = "Tiện ích đã kết nối lại sau cảnh báo Flow; tiếp tục pha hiện tại."
     elif status == "running" and previous_phase == "waiting_for_flow_tab":
         updates["phase"] = "submitting"
         updates["awaiting_user_action"] = False
         updates["pending_action"] = None
-        updates["message"] = "Extension connected to the Flow tab."
+        updates["message"] = "Tiện ích đã kết nối với tab Flow."
     return set_extension_run(**updates)
 
 
 def _extension_project_path() -> str:
     project_path = EXTENSION_RUN.get("project_path")
     if not project_path:
-        raise RuntimeError("Extension visual mode is not prepared. Start it from the local UI first.")
+        raise RuntimeError("Chế độ visual bằng tiện ích chưa được chuẩn bị. Hãy khởi động từ UI local trước.")
     return project_path
 
 
@@ -996,7 +1050,7 @@ def extension_next_prompt():
             EXTENSION_RUN["phase"] = "stopped"
             EXTENSION_RUN["finished_at"] = utc_now()
             EXTENSION_RUN["updated_at"] = utc_now()
-            extension_add_log_unlocked("Extension visual mode stopped.")
+            extension_add_log_unlocked("Đã dừng chế độ visual bằng tiện ích.")
             return {"stop_requested": True, **extension_snapshot()}
         if EXTENSION_RUN.get("status") != "running":
             return {"prompt": None, "reason": "not_running", **extension_snapshot()}
@@ -1008,7 +1062,7 @@ def extension_next_prompt():
     visual_snapshot = visual_job_snapshot()
     if visual_snapshot_is_active(visual_snapshot):
         raise RuntimeError(
-            "The Chrome/CDP visual worker is active. Extension mode is paused to avoid two visual workers."
+            "Visual worker Chrome/CDP đang hoạt động. Chế độ tiện ích tạm dừng để tránh chạy hai visual worker."
         )
 
     counts = flow_queue_status(project_path).get("counts", {})
@@ -1035,7 +1089,7 @@ def extension_next_prompt():
                 awaiting_user_action=True,
                 pending_action="start_download",
                 audio_cue="submit_done",
-                message=f"No ready prompts; waiting for manual download start for {submitted} submitted clips.",
+                message=f"Không còn prompt sẵn sàng; đang chờ bạn bắt đầu tải xuống thủ công cho {submitted} clip đã gửi.",
             )
             return {"prompt": None, "reason": "waiting_downloads", **extension_snapshot(project_path)}
         set_extension_run(
@@ -1047,9 +1101,9 @@ def extension_next_prompt():
             pending_action=None,
             audio_cue="all_done",
             message=(
-                "Extension visual mode completed: no prompt_ready or submitted items remain."
+                "Chế độ visual bằng tiện ích đã hoàn tất: không còn mục prompt_ready hoặc submitted."
                 if int(counts.get("failed") or 0) == 0
-                else f"Extension visual mode completed with {int(counts.get('failed') or 0)} failed prompts."
+                else f"Chế độ visual bằng tiện ích đã hoàn tất với {int(counts.get('failed') or 0)} prompt lỗi."
             ),
         )
         return {"prompt": None, "reason": "completed", **extension_snapshot(project_path)}
@@ -1086,7 +1140,7 @@ def mark_extension_submitted(project_path: str, index: int):
         updated = item
         break
     if updated is None:
-        raise ValueError(f"Prompt index not found: {index}")
+        raise ValueError(f"Không tìm thấy chỉ mục prompt: {index}")
     write_json(prompts_path, prompts)
     with EXTENSION_RUN_LOCK:
         EXTENSION_RUN["submitted_in_batch"] = int(EXTENSION_RUN.get("submitted_in_batch") or 0) + 1
@@ -1094,7 +1148,7 @@ def mark_extension_submitted(project_path: str, index: int):
         phase="submitting",
         last_index=int(index),
         counts=flow_queue_status(project_path).get("counts"),
-        message=f"Extension submitted prompt #{int(index):03d}.",
+        message=f"Tiện ích đã gửi prompt #{int(index):03d}.",
     )
     return {"submitted": {"index": int(index), "flow_title": updated.get("flow_title")}, **extension_snapshot(project_path)}
 
@@ -1120,25 +1174,25 @@ def mark_extension_card_retry(project_path: str, index: int, reason: str = "card
         result_status = "prompt_ready"
         break
     if result_status is None:
-        raise ValueError(f"Prompt index not found: {index}")
+        raise ValueError(f"Không tìm thấy chỉ mục prompt: {index}")
     write_json(project["prompts_path"], prompts)
     counts = flow_queue_status(project_path).get("counts", {})
     set_extension_run(
         phase="downloading",
         counts=counts,
-        message=f"Card #{int(index):03d} error - marked {result_status} for the manual regen phase.",
+        message=f"Card #{int(index):03d} bị lỗi - đã đánh dấu {result_status} cho pha tạo lại thủ công.",
     )
     return {"index": int(index), "status": result_status, **extension_snapshot(project_path)}
 
 
 def mark_extension_flow_error(project_path: str, index: int | None, message: str):
-    message = message or "Flow error"
-    errors = [{"index": index, "type": "extension_flow_error", "message": message or "Flow error"}]
+    message = message or "Lỗi Flow"
+    errors = [{"index": index, "type": "extension_flow_error", "message": message or "Lỗi Flow"}]
     blocked = mark_flow_error_prompts_ready(project_path, errors)
     resume_phase = EXTENSION_RUN.get("phase")
     if resume_phase not in {"submitting", "downloading", "awaiting_download", "awaiting_regen"}:
         resume_phase = "submitting"
-    if message.startswith("Wrong Flow project tab:"):
+    if message.startswith("Sai tab dự án Flow:") or message.startswith("Wrong Flow project tab:"):
         return set_extension_run(
             status="paused",
             phase="wrong_project",
@@ -1151,7 +1205,7 @@ def mark_extension_flow_error(project_path: str, index: int | None, message: str
         phase="flow_error_wait",
         resume_phase=resume_phase,
         counts=flow_queue_status(project_path).get("counts"),
-        message=f"Flow warning detected; extension is waiting and will continue automatically: {message}",
+        message=f"Phát hiện cảnh báo Flow; tiện ích đang chờ và sẽ tự tiếp tục: {message}",
         blocked_prompts=blocked,
     )
 
@@ -1161,9 +1215,9 @@ def complete_extension_run(project_path: str, message: str = ""):
     failed = flow_queue_indexes(project_path).get("failed_indexes", [])
     if not message:
         message = (
-            "Extension visual mode completed."
+            "Chế độ visual bằng tiện ích đã hoàn tất."
             if not failed
-            else "Extension visual mode completed. Not generated: "
+            else "Chế độ visual bằng tiện ích đã hoàn tất. Chưa tạo được: "
             + ", ".join(f"#{int(idx):03d}" for idx in failed)
         )
     return set_extension_run(
@@ -1197,7 +1251,7 @@ def report_extension_phase_done(project_path: str, phase: str):
                 awaiting_user_action=True,
                 pending_action="start_download",
                 audio_cue="submit_done",
-                message=f"Submit phase finished. Waiting for manual download start for {submitted} submitted clips.",
+                message=f"Pha gửi prompt đã hoàn tất. Đang chờ bạn bắt đầu tải xuống thủ công cho {submitted} clip đã gửi.",
             )
         if ready:
             return set_extension_run(
@@ -1205,17 +1259,17 @@ def report_extension_phase_done(project_path: str, phase: str):
                 counts=counts,
                 awaiting_user_action=False,
                 pending_action=None,
-                message=f"Submit phase paused with {ready} prompt_ready item(s) still available.",
+                message=f"Pha gửi prompt tạm dừng khi vẫn còn {ready} mục prompt_ready.",
             )
-        return complete_extension_run(project_path, "Extension visual mode completed: nothing remains to download.")
+        return complete_extension_run(project_path, "Chế độ visual bằng tiện ích đã hoàn tất: không còn gì để tải xuống.")
 
     if phase == "download":
         if unresolved["total"] <= 0:
-            return complete_extension_run(project_path, "Extension visual mode completed: all clips are downloaded.")
+            return complete_extension_run(project_path, "Chế độ visual bằng tiện ích đã hoàn tất: tất cả clip đã được tải xuống.")
         pending_action = "start_regen" if unresolved["regenerable_count"] > 0 else "complete"
         message = (
-            f"Download phase finished. {unresolved['total']} prompt(s) remain unresolved; "
-            f"{unresolved['regenerable_count']} can be regenerated."
+            f"Pha tải xuống đã hoàn tất. Còn {unresolved['total']} prompt chưa xử lý; "
+            f"{unresolved['regenerable_count']} prompt có thể tạo lại."
         )
         return set_extension_run(
             phase="awaiting_regen",
@@ -1226,7 +1280,7 @@ def report_extension_phase_done(project_path: str, phase: str):
             message=message,
         )
 
-    raise ValueError(f"Unsupported extension phase report: {phase}")
+    raise ValueError(f"Báo cáo pha tiện ích không được hỗ trợ: {phase}")
 
 
 def _mark_unresolved_failed(project_path: str, indexes, reason: str):
@@ -1260,19 +1314,19 @@ def run_extension_phase_action(project_path: str, action: str):
 
     if action == "start_download":
         if phase != "awaiting_download":
-            raise RuntimeError(f"Cannot start download from phase {phase}.")
+            raise RuntimeError(f"Không thể bắt đầu tải xuống từ pha {phase}.")
         return set_extension_run(
             phase="downloading",
             counts=counts,
             awaiting_user_action=False,
             pending_action=None,
             audio_cue=None,
-            message="Manual download phase started.",
+            message="Đã bắt đầu pha tải xuống thủ công.",
         )
 
     if action == "start_regen":
         if phase != "awaiting_regen":
-            raise RuntimeError(f"Cannot start regeneration from phase {phase}.")
+            raise RuntimeError(f"Không thể bắt đầu tạo lại từ pha {phase}.")
         regenerable = set(unresolved["regenerable_indexes"])
         exhausted = set(unresolved["exhausted_indexes"])
         project = resolve_frames_project(project_path)
@@ -1308,7 +1362,7 @@ def run_extension_phase_action(project_path: str, action: str):
             awaiting_user_action=False,
             pending_action=None,
             audio_cue=None,
-            message=f"Regeneration queued for {len(regenerated)} prompt(s).",
+            message=f"Đã đưa {len(regenerated)} prompt vào hàng đợi tạo lại.",
         )
 
     if action == "complete":
@@ -1316,14 +1370,14 @@ def run_extension_phase_action(project_path: str, action: str):
         return complete_extension_run(
             project_path,
             (
-                "Extension visual mode completed."
+                "Chế độ visual bằng tiện ích đã hoàn tất."
                 if not failed
-                else "Extension visual mode completed. Not generated: "
+                else "Chế độ visual bằng tiện ích đã hoàn tất. Chưa tạo được: "
                 + ", ".join(f"#{int(idx):03d}" for idx in failed)
             ),
         )
 
-    raise ValueError(f"Unsupported extension phase action: {action}")
+    raise ValueError(f"Thao tác pha tiện ích không được hỗ trợ: {action}")
 
 
 def mark_flow_error_prompts_ready(project_path: str, flow_errors):
@@ -1348,7 +1402,7 @@ def mark_flow_error_prompts_ready(project_path: str, flow_errors):
             continue
         previous_status = item.get("status")
         item["status"] = "prompt_ready"
-        item["flow_error"] = error_item.get("message") or "Flow error"
+        item["flow_error"] = error_item.get("message") or "Lỗi Flow"
         item["flow_error_at"] = now
         item["flow_error_previous_status"] = previous_status
         updated.append(
@@ -1369,7 +1423,7 @@ def mark_flow_error_prompts_ready(project_path: str, flow_errors):
 def submit_ready_flow_batch(project_path: str, count: int, delay_seconds: float, flow: FlowAutomation | None = None):
     flow = flow or FLOW
     if not flow.is_open:
-        raise RuntimeError("Flow browser is not open. Click Open Flow browser first.")
+        raise RuntimeError("Trình duyệt Flow chưa mở. Hãy mở Flow trước.")
     project = resolve_frames_project(project_path)
     prompts_path = project["prompts_path"]
     existing_errors = flow.visible_flow_errors()
@@ -1380,8 +1434,8 @@ def submit_ready_flow_batch(project_path: str, count: int, delay_seconds: float,
             "blocked_prompts": blocked_prompts,
             "flow_errors": existing_errors,
             "message": (
-                "Flow is showing unusual activity errors. "
-                "Stopped before sending more prompts; affected submitted items were returned to prompt_ready."
+                "Flow đang hiển thị cảnh báo unusual activity. "
+                "Đã dừng trước khi gửi thêm prompt; các mục submitted bị ảnh hưởng đã được đưa về prompt_ready."
             ),
             **flow_queue_status(project_path),
         }
@@ -1393,7 +1447,7 @@ def submit_ready_flow_batch(project_path: str, count: int, delay_seconds: float,
         return {
             "submitted": [],
             "blocked_prompts": [],
-            "message": "No prompt_ready items found.",
+            "message": "Không tìm thấy mục prompt_ready.",
             **flow_queue_status(project_path),
         }
 
@@ -1410,7 +1464,7 @@ def submit_ready_flow_batch(project_path: str, count: int, delay_seconds: float,
         ]
         if matching_errors:
             item["status"] = "prompt_ready"
-            item["flow_error"] = matching_errors[0].get("message") or "Flow error"
+            item["flow_error"] = matching_errors[0].get("message") or "Lỗi Flow"
             item["flow_error_at"] = utc_now()
             item["flow_error_previous_status"] = "submitted"
             blocked_prompts.append(
@@ -1436,10 +1490,10 @@ def submit_ready_flow_batch(project_path: str, count: int, delay_seconds: float,
 
     if blocked_prompts:
         message = (
-            f"Submitted {len(submitted)} prompts to Flow, then stopped on Flow unusual activity."
+            f"Đã gửi {len(submitted)} prompt vào Flow, sau đó dừng do cảnh báo unusual activity."
         )
     else:
-        message = f"Submitted {len(submitted)} prompts to Flow."
+        message = f"Đã gửi {len(submitted)} prompt vào Flow."
 
     return {
         "submitted": submitted,
@@ -1473,7 +1527,7 @@ def update_downloaded_prompts(project_path: str, downloaded):
         elif result.get("status") == "flow_error":
             if item.get("status") != "downloaded":
                 item["status"] = "prompt_ready"
-                item["flow_error"] = result.get("error") or "Flow error"
+                item["flow_error"] = result.get("error") or "Lỗi Flow"
                 item["flow_error_at"] = utc_now()
                 item["flow_error_previous_status"] = result.get("previous_status") or "submitted"
         elif result.get("status") == "duplicate_media":
@@ -1490,7 +1544,7 @@ def update_downloaded_prompts(project_path: str, downloaded):
     if downloaded:
         write_json(prompts_path, prompts)
     return {
-        "message": f"Processed {len(downloaded)} visible Flow download buttons.",
+        "message": f"Đã xử lý {len(downloaded)} nút tải xuống Flow đang hiển thị.",
         "downloaded": downloaded,
         **flow_queue_status(project_path),
     }
@@ -1515,7 +1569,7 @@ def download_all_flow_clips(project_path: str, count: int, flow: FlowAutomation 
         max_count=count,
     )
     result = update_downloaded_prompts(project_path, downloaded)
-    result["message"] = f"Processed {len(downloaded)} Flow download candidates with auto-scroll."
+    result["message"] = f"Đã xử lý {len(downloaded)} mục tải xuống Flow bằng auto-scroll."
     result["blocked_prompts"] = blocked_prompts + result.get("blocked_prompts", [])
     result["flow_errors"] = flow_errors
     return result
@@ -1654,7 +1708,7 @@ def _move_duplicate_clip(project: dict, target: Path, duplicate: dict, index: in
     return {
         "index": int(index),
         "status": "duplicate_media",
-        "error": f"Downloaded media is identical to another clip: {duplicate['path']}",
+        "error": f"Media đã tải xuống giống hệt một clip khác: {duplicate['path']}",
         "path": str(target),
         "duplicate_path": str(duplicate_path),
         "duplicate_of": duplicate["path"],
@@ -1679,12 +1733,12 @@ def _save_extension_video_payload(payload: bytes, target: Path, raw_path: Path):
                 if name.lower().endswith((".mp4", ".mov", ".webm"))
             ]
             if not video_names:
-                raise RuntimeError(f"Downloaded ZIP did not contain a video file: {raw_path}")
+                raise RuntimeError(f"Tệp ZIP đã tải xuống không chứa tệp video: {raw_path}")
             with archive.open(video_names[0]) as source, target.open("wb") as dest:
                 dest.write(source.read())
         return {"raw_path": str(raw_path), "container": "zip_extension", "inner_name": video_names[0]}
 
-    raise RuntimeError("Extension media payload is not an MP4 or ZIP video package.")
+    raise RuntimeError("Payload media từ tiện ích không phải MP4 hoặc gói ZIP video.")
 
 
 def download_extension_media(project_path: str, index: int, media_url: str = "", data_base64: str = ""):
@@ -1702,7 +1756,7 @@ def download_extension_media(project_path: str, index: int, media_url: str = "",
             set_extension_run(
                 phase="downloading",
                 counts=updated.get("counts"),
-                message=f"Extension rejected duplicate media for clip #{int(index):03d}.",
+                message=f"Tiện ích đã từ chối media trùng lặp cho clip #{int(index):03d}.",
             )
             return {"downloaded": [result], **extension_snapshot(project_path)}
         result = {
@@ -1728,7 +1782,7 @@ def download_extension_media(project_path: str, index: int, media_url: str = "",
             with request.urlopen(req, timeout=120) as response:
                 payload = response.read()
         else:
-            raise ValueError("media_url or data_base64 is required")
+            raise ValueError("Cần có media_url hoặc data_base64")
         saved = _save_extension_video_payload(payload, target, raw_path)
         duplicate = _find_duplicate_clip_hash(project["clips_dir"], target)
         if duplicate:
@@ -1738,7 +1792,7 @@ def download_extension_media(project_path: str, index: int, media_url: str = "",
             set_extension_run(
                 phase="downloading",
                 counts=updated.get("counts"),
-                message=f"Extension rejected duplicate media for clip #{int(index):03d}.",
+                message=f"Tiện ích đã từ chối media trùng lặp cho clip #{int(index):03d}.",
             )
             return {"downloaded": [result], **extension_snapshot(project_path)}
         result = {
@@ -1764,9 +1818,9 @@ def download_extension_media(project_path: str, index: int, media_url: str = "",
         phase="downloading",
         counts=updated.get("counts"),
         message=(
-            f"Extension downloaded clip #{int(index):03d}."
+            f"Tiện ích đã tải clip #{int(index):03d}."
             if result["status"] in {"downloaded", "skipped_existing"}
-            else f"Extension could not download clip #{int(index):03d}: {result.get('error')}"
+            else f"Tiện ích không thể tải clip #{int(index):03d}: {result.get('error')}"
         ),
     )
     return {"downloaded": [result], **extension_snapshot(project_path)}
@@ -1880,10 +1934,10 @@ def set_visual_job(**updates):
         VISUAL_JOB.update(updates)
         VISUAL_JOB["updated_at"] = utc_now()
         phase = VISUAL_JOB.get("phase") or "idle"
-        VISUAL_JOB["phase_label"] = PHASE_LABELS_RU.get(phase, phase)
+        VISUAL_JOB["phase_label"] = PHASE_LABELS_VI.get(phase, phase)
         status = VISUAL_JOB.get("status")
         if status in {"paused", "error", "completed", "stopped"}:
-            VISUAL_JOB["next_action"] = PHASE_NEXT_ACTIONS_RU.get(phase, "")
+            VISUAL_JOB["next_action"] = PHASE_NEXT_ACTIONS_VI.get(phase, "")
         else:
             VISUAL_JOB["next_action"] = ""
         message = updates.get("message")
@@ -1986,8 +2040,8 @@ def recover_flow_for_visual_job(project_path: str, flow: FlowAutomation, max_sec
             status="recovering",
             phase="flow_recovery",
             message=(
-                f"Flow заблокирован (unusual activity). Перезагрузка №{attempt}, "
-                f"осталось {remaining} c."
+                f"Flow bị chặn bởi unusual activity. Đang tải lại lần {attempt}, "
+                f"còn {remaining} giây."
             ),
             counts=flow_queue_status(project_path).get("counts"),
         )
@@ -1997,7 +2051,7 @@ def recover_flow_for_visual_job(project_path: str, flow: FlowAutomation, max_sec
             set_visual_job(
                 status="recovering",
                 phase="flow_recovery",
-                message=f"Reload Flow упал: {exc}. Пытаемся восстановить вкладку.",
+                message=f"Tải lại Flow bị lỗi: {exc}. Đang thử khôi phục tab.",
             )
             if not reopen_flow_for_visual_job(flow, project_path, flow_project_url):
                 return {
@@ -2042,8 +2096,8 @@ def download_submitted_for_visual_job(
             status="running",
             phase="download",
             message=(
-                f"Скачиваем уже отправленные клипы (попытка {attempt}). "
-                f"Осталось submitted: {submitted_left}."
+                f"Đang tải các clip đã gửi (lần thử {attempt}). "
+                f"Còn submitted: {submitted_left}."
             ),
             counts=queue.get("counts"),
         )
@@ -2086,8 +2140,8 @@ def download_submitted_for_visual_job(
             attempt += 1
             continue
 
-        # Ничего не скачалось и Flow не показывает ошибок — значит клипов в Flow нет.
-        # Сбрасываем все submitted в prompt_ready и выходим, пусть автоматизация их пере-отправит.
+        # Nothing downloaded and Flow shows no errors, so the clips are not visible in Flow.
+        # Reset submitted items to prompt_ready so automation can resend them.
         try:
             visible = flow.collect_visible_indexes()
         except Exception:
@@ -2103,18 +2157,18 @@ def download_submitted_for_visual_job(
         if reset:
             indexes_preview = ", ".join(f"#{r['index']:03d}" for r in reset[:8])
             if len(reset) > 8:
-                indexes_preview += f" и ещё {len(reset) - 8}"
+                indexes_preview += f" và thêm {len(reset) - 8}"
             reset_reason = (
-                "Flow показывает их на странице, но скачать не получается"
+                "Flow hiển thị chúng trên trang nhưng không tải được"
                 if reset_visible_submitted else
-                "Flow не показывает их на странице"
+                "Flow không hiển thị chúng trên trang"
             )
             set_visual_job(
                 status="running",
                 phase="download",
                 message=(
-                    f"{reset_reason}: {len(reset)} ранее отправленных клипов "
-                    f"({indexes_preview}). Возвращаем их в prompt_ready и пере-отправим."
+                    f"{reset_reason}: {len(reset)} clip đã gửi trước đó "
+                    f"({indexes_preview}). Đưa chúng về prompt_ready để gửi lại."
                 ),
                 counts=flow_queue_status(project_path).get("counts"),
             )
@@ -2135,8 +2189,8 @@ def pause_browser_closed(project_path: str):
         phase="browser_closed",
         finished_at=utc_now(),
         message=(
-            "Окно Flow закрылось во время автоматизации. "
-            "Откройте Flow заново и снова нажмите «Сгенерировать визуал»."
+            "Cửa sổ Flow đã đóng trong lúc tự động hoá. "
+            "Hãy mở lại Flow rồi chạy lại chế độ tạo visual."
         ),
         counts=flow_queue_status(project_path).get("counts"),
     )
@@ -2148,10 +2202,9 @@ def pause_wrong_project(project_path: str, expected_url: str, current_url: str):
         phase="wrong_project",
         finished_at=utc_now(),
         message=(
-            f"Flow открыт не в нужном проекте.\nОжидался URL: {expected_url}\n"
-            f"Сейчас открыто: {current_url or 'неизвестно'}.\n"
-            "Откройте нужный проект внутри Flow, нажмите «Зафиксировать текущий URL», "
-            "затем снова «Сгенерировать визуал»."
+            f"Flow đang mở sai dự án.\nURL cần mở: {expected_url}\n"
+            f"Hiện đang mở: {current_url or 'không rõ'}.\n"
+            "Hãy mở đúng dự án trong Flow, lưu URL dự án, rồi chạy lại chế độ tạo visual."
         ),
         counts=flow_queue_status(project_path).get("counts"),
     )
@@ -2168,9 +2221,9 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
             phase="open_flow",
             flow_project_url=flow_project_url,
             message=(
-                f"Открываем проект Flow: {flow_project_url}"
+                f"Đang mở dự án Flow: {flow_project_url}"
                 if flow_project_url else
-                "Открываем Flow (URL проекта не задан — буду работать на текущей вкладке)."
+                "Đang mở Flow (chưa đặt URL dự án, sẽ làm việc trên tab hiện tại)."
             ),
             counts=flow_queue_status(project_path).get("counts"),
         )
@@ -2182,7 +2235,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                 status="paused",
                 phase="browser_closed",
                 finished_at=utc_now(),
-                message=f"Не удалось открыть Flow: {exc}",
+                message=f"Không thể mở Flow: {exc}",
                 counts=flow_queue_status(project_path).get("counts"),
             )
             return
@@ -2221,8 +2274,8 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                         phase="flow_error",
                         finished_at=utc_now(),
                         message=(
-                            "Flow продолжает показывать unusual activity после попыток восстановления. "
-                            "Автоматизация поставлена на паузу."
+                            "Flow vẫn hiển thị unusual activity sau các lần thử khôi phục. "
+                            "Tự động hoá đã được tạm dừng."
                         ),
                         counts=flow_queue_status(project_path).get("counts"),
                     )
@@ -2232,8 +2285,8 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                     phase="download_timeout",
                     finished_at=utc_now(),
                     message=(
-                        "Не все отправленные клипы успели стать готовыми за 5 минут. "
-                        "Автоматизация на паузе, чтобы не отправлять новую пачку слишком рано."
+                        "Không phải tất cả clip đã gửi đều kịp sẵn sàng trong 5 phút. "
+                        "Tự động hoá tạm dừng để tránh gửi lô mới quá sớm."
                     ),
                     counts=flow_queue_status(project_path).get("counts"),
                 )
@@ -2244,7 +2297,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                     status="completed",
                     phase="completed",
                     finished_at=utc_now(),
-                    message="Готово: в очереди нет ни submitted, ни prompt_ready.",
+                    message="Hoàn tất: hàng đợi không còn submitted hoặc prompt_ready.",
                     counts=counts,
                 )
                 return
@@ -2264,8 +2317,8 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                         phase="flow_error",
                         finished_at=utc_now(),
                         message=(
-                            "Flow unusual activity не пропал за 5 минут. "
-                            "Автоматизация на паузе перед отправкой следующей пачки."
+                            "Flow unusual activity không biến mất trong 5 phút. "
+                            "Tự động hoá tạm dừng trước khi gửi lô tiếp theo."
                         ),
                         counts=flow_queue_status(project_path).get("counts"),
                     )
@@ -2274,7 +2327,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
             set_visual_job(
                 status="running",
                 phase="submit",
-                message=f"Отправляем следующую пачку — до {batch_count} промптов.",
+                message=f"Đang gửi lô tiếp theo - tối đa {batch_count} prompt.",
                 counts=flow_queue_status(project_path).get("counts"),
             )
             try:
@@ -2290,10 +2343,10 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                     status="paused",
                     phase="submit",
                     finished_at=utc_now(),
-                    message=(
-                        f"Отправка пачки остановлена: {exc}. "
-                        "Ничего не помечено как submitted; проверьте окно Flow и запустите снова."
-                    ),
+                message=(
+                    f"Đã dừng gửi lô prompt: {exc}. "
+                    "Chưa mục nào được đánh dấu submitted; hãy kiểm tra cửa sổ Flow và chạy lại."
+                ),
                     counts=flow_queue_status(project_path).get("counts"),
                 )
                 return
@@ -2309,8 +2362,8 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                         phase="flow_error",
                         finished_at=utc_now(),
                         message=(
-                            "Во время отправки появилось unusual activity. "
-                            "Автоматизация на паузе после 5-минутного окна восстановления."
+                            "Unusual activity xuất hiện trong lúc gửi. "
+                            "Tự động hoá tạm dừng sau cửa sổ khôi phục 5 phút."
                         ),
                         counts=flow_queue_status(project_path).get("counts"),
                     )
@@ -2324,7 +2377,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                         status="completed",
                         phase="completed",
                         finished_at=utc_now(),
-                        message="Готово: ничего не осталось для отправки.",
+                        message="Hoàn tất: không còn gì để gửi.",
                         counts=queue.get("counts"),
                     )
                     return
@@ -2332,7 +2385,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                     status="paused",
                     phase="submit_empty",
                     finished_at=utc_now(),
-                    message="Flow не принял новую пачку. Автоматизация на паузе.",
+                    message="Flow không nhận lô prompt mới. Tự động hoá tạm dừng.",
                     counts=queue.get("counts"),
                 )
                 return
@@ -2340,7 +2393,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
             set_visual_job(
                 status="running",
                 phase="wait_after_submit",
-                message=f"Отправлено {submitted_count} промптов. Ждём 60 c перед скачиванием.",
+                message=f"Đã gửi {submitted_count} prompt. Chờ 60 giây trước khi tải xuống.",
                 counts=submit_result.get("counts"),
             )
             if not sleep_visual_job(60):
@@ -2350,7 +2403,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
             status="stopped",
             phase="stopped",
             finished_at=utc_now(),
-            message="Автоматизация остановлена пользователем.",
+            message="Tự động hoá đã được người dùng dừng.",
             counts=flow_queue_status(project_path).get("counts"),
         )
     except Exception as exc:
@@ -2362,7 +2415,7 @@ def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | 
                 status="error",
                 phase="error",
                 finished_at=utc_now(),
-                message=f"Автоматизация упала: {exc}",
+                message=f"Tự động hoá bị lỗi: {exc}",
                 counts=flow_queue_status(project_path).get("counts") if project_path else None,
             )
     finally:
@@ -2394,7 +2447,7 @@ def start_visual_job(project_path: str, batch_count: int, flow_project_url: str 
             {
                 "status": "running",
                 "phase": "starting",
-                "message": "Starting visual automation.",
+                "message": "Đang khởi động tự động hoá visual.",
                 "project_path": project_path,
                 "flow_project_url": flow_project_url,
                 "batch_count": batch_count,
@@ -2444,7 +2497,7 @@ def stop_visual_job():
         VISUAL_JOB["stop_requested"] = True
         VISUAL_JOB["status"] = "stopping"
         VISUAL_JOB["phase"] = "stopping"
-        VISUAL_JOB["message"] = "Stopping visual automation after current operation."
+        VISUAL_JOB["message"] = "Đang dừng tự động hoá visual sau thao tác hiện tại."
         VISUAL_JOB["updated_at"] = utc_now()
         stop_path = VISUAL_JOB.get("stop_path")
         if stop_path:
@@ -2513,7 +2566,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/extension/unresolved":
                 project_path = EXTENSION_RUN.get("project_path")
                 if not project_path:
-                    raise RuntimeError("Extension visual mode is not prepared. Start it from the local UI first.")
+                    raise RuntimeError("Chế độ visual bằng tiện ích chưa được chuẩn bị. Hãy khởi động từ UI local trước.")
                 json_response(self, 200, extension_unresolved(project_path))
                 return
 
@@ -2559,6 +2612,20 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if self.path == "/api/sentences/load":
+                project_path = body.get("project_path") or body.get("path")
+                if not project_path:
+                    raise ValueError("Thiếu project_path")
+                json_response(self, 200, load_script_for_editor(project_path))
+                return
+
+            if self.path == "/api/sentences/save":
+                project_path = body.get("project_path") or body.get("path")
+                if not project_path:
+                    raise ValueError("Thiếu project_path")
+                json_response(self, 200, save_script_from_editor(project_path, body.get("script_text") or ""))
+                return
+
             if self.path == "/api/project/status":
                 json_response(self, 200, project_status(body["path"]))
                 return
@@ -2566,7 +2633,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/project/flow-url":
                 project_path = body.get("project_path") or body.get("path")
                 if not project_path:
-                    raise ValueError("project_path is required")
+                    raise ValueError("Thiếu project_path")
                 url = save_flow_project_url(project_path, body.get("flow_project_url") or body.get("url") or "")
                 json_response(self, 200, {"ok": True, "flow_project_url": url, **project_status(project_path)})
                 return
@@ -2583,7 +2650,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     selected = pick_range(sentences, start, count)
                 if not selected:
-                    raise ValueError("No script fragments selected")
+                    raise ValueError("Chưa chọn đoạn kịch bản nào")
 
                 selected_context = with_neighbors(sentences, selected)
                 user_prompt = build_user_prompt(selected_context, channel, body.get("style_prompt", ""))
@@ -2619,7 +2686,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/channel/save":
                 channel_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", body.get("id", "").strip())
                 if not channel_id:
-                    raise ValueError("Channel id is required")
+                    raise ValueError("Thiếu channel id")
                 body["id"] = channel_id
                 write_json(CHANNELS_DIR / f"{channel_id}.json", body)
                 json_response(self, 200, {"ok": True})
@@ -2628,7 +2695,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/flow/queue":
                 project_path = body.get("project_path") or body.get("path")
                 if not project_path:
-                    raise ValueError("project_path is required")
+                    raise ValueError("Thiếu project_path")
                 json_response(self, 200, flow_queue_status(project_path))
                 return
 
@@ -2639,7 +2706,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/extension/start":
                 project_path = body.get("project_path") or body.get("path")
                 if not project_path:
-                    raise ValueError("project_path is required")
+                    raise ValueError("Thiếu project_path")
                 count = max(1, int(body.get("count", EXTENSION_ROUND_BATCH)))
                 raw_flow_project_url = (body.get("flow_project_url") or "").strip()
                 flow_project_url = (
@@ -2703,7 +2770,7 @@ class Handler(BaseHTTPRequestHandler):
                 project_path = body.get("project_path") or body.get("path") or _extension_project_path()
                 raw_index = body.get("index")
                 index = None if raw_index is None else int(raw_index)
-                json_response(self, 200, mark_extension_flow_error(project_path, index, body.get("message") or "Flow error"))
+                json_response(self, 200, mark_extension_flow_error(project_path, index, body.get("message") or "Lỗi Flow"))
                 return
 
             if self.path == "/api/extension/complete":
@@ -2733,49 +2800,70 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 500, {"error": str(exc)})
 
 
-def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "--visual-worker":
-        if len(sys.argv) < 6:
-            raise SystemExit("Usage: app.py --visual-worker <project_path> <batch_count> <status_path> <stop_path> [<flow_project_url>]")
-        project_path = sys.argv[2]
-        batch_count = int(sys.argv[3])
-        status_path = Path(sys.argv[4])
-        stop_path = Path(sys.argv[5])
-        flow_project_url = sys.argv[6] if len(sys.argv) >= 7 else ""
-        flow_project_url = require_flow_project_url(flow_project_url) or None
-        with VISUAL_JOB_LOCK:
-            VISUAL_JOB.update(
-                {
-                    "status": "running",
-                    "phase": "starting",
-                    "message": "Visual worker process started.",
-                    "project_path": project_path,
-                    "flow_project_url": flow_project_url,
-                    "batch_count": batch_count,
-                    "started_at": utc_now(),
-                    "updated_at": utc_now(),
-                    "finished_at": None,
-                    "stop_requested": False,
-                    "counts": None,
-                    "process": None,
-                    "status_path": status_path,
-                    "stop_path": stop_path,
-                    "browser": None,
-                    "log": [],
-                }
-            )
-            write_visual_job_status_unlocked()
-        run_visual_job(project_path, batch_count, flow_project_url)
-        return
-
+def ensure_runtime_dirs() -> None:
     CHANNELS_DIR.mkdir(parents=True, exist_ok=True)
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
     WEB_DIR.mkdir(parents=True, exist_ok=True)
-    server = HTTPServer((HOST, PORT), Handler)
-    safe_console_write(f"Flow Veo Studio running at http://{HOST}:{PORT}")
-    safe_console_write(f"Project root: {ROOT}")
-    safe_console_write("Press Ctrl+C to stop.")
+
+
+def create_server(host: str = HOST, port: int = PORT) -> HTTPServer:
+    ensure_runtime_dirs()
+    return HTTPServer((host, port), Handler)
+
+
+def serve_server(server: HTTPServer) -> None:
+    host, port = server.server_address
+    safe_console_write(f"Flow Veo Studio đang chạy tại http://{host}:{port}")
+    safe_console_write(f"Thư mục dự án: {ROOT}")
+    safe_console_write("Nhấn Ctrl+C để dừng.")
     server.serve_forever()
+
+
+def run_server(host: str = HOST, port: int = PORT) -> None:
+    server = create_server(host, port)
+    serve_server(server)
+
+
+def run_visual_worker_from_args(argv: list[str]) -> None:
+    if len(argv) < 6:
+        raise SystemExit("Usage: app.py --visual-worker <project_path> <batch_count> <status_path> <stop_path> [<flow_project_url>]")
+    project_path = argv[2]
+    batch_count = int(argv[3])
+    status_path = Path(argv[4])
+    stop_path = Path(argv[5])
+    flow_project_url = argv[6] if len(argv) >= 7 else ""
+    flow_project_url = require_flow_project_url(flow_project_url) or None
+    with VISUAL_JOB_LOCK:
+        VISUAL_JOB.update(
+            {
+                    "status": "running",
+                    "phase": "starting",
+                    "message": "Tiến trình visual worker đã khởi động.",
+                "project_path": project_path,
+                "flow_project_url": flow_project_url,
+                "batch_count": batch_count,
+                "started_at": utc_now(),
+                "updated_at": utc_now(),
+                "finished_at": None,
+                "stop_requested": False,
+                "counts": None,
+                "process": None,
+                "status_path": status_path,
+                "stop_path": stop_path,
+                "browser": None,
+                "log": [],
+            }
+        )
+        write_visual_job_status_unlocked()
+    run_visual_job(project_path, batch_count, flow_project_url)
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--visual-worker":
+        run_visual_worker_from_args(sys.argv)
+        return
+
+    run_server()
 
 
 if __name__ == "__main__":
