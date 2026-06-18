@@ -4,141 +4,52 @@ import json
 import mimetypes
 import os
 import re
-import subprocess
 import sys
 import threading
 import time
 import traceback
 import base64
 import hashlib
-import zipfile
+import stat
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib import error, request
-from urllib.parse import urlsplit, urlunsplit
-
-from src.flow_automation import FLOW_URL, FlowAutomation
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 
 ROOT = Path(__file__).resolve().parent
-CHANNELS_DIR = ROOT / "channels"
+
+
+def load_local_env(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        value = value.strip().strip('"').strip("'")
+        os.environ[key] = value
+
+
+load_local_env(ROOT / ".env")
+
 PROJECTS_DIR = ROOT / "projects"
 WEB_DIR = ROOT / "web"
-LIBRARY_ROOT = Path(os.environ.get("FLOW_VEO_LIBRARY_ROOT", r"D:\MyChannelsIRL"))
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("FLOW_VEO_PORT", "8765"))
-FLOW = FlowAutomation(ROOT)
-VISUAL_JOB_LOCK = threading.RLock()
-PHASE_LABELS_VI = {
-    "idle": "Đang chờ",
-    "starting": "Đang khởi động",
-    "open_flow": "Đang mở Flow",
-    "queue": "Đang kiểm tra hàng đợi",
-    "download": "Đang tải các clip đã gửi",
-    "submit": "Đang gửi lô prompt mới",
-    "wait_after_submit": "Đang chờ lô mới sẵn sàng",
-    "flow_recovery": "Đang tải lại Flow sau cảnh báo",
-    "flow_error": "Flow bị chặn bởi cảnh báo unusual activity",
-    "download_timeout": "Tải xuống chưa kịp hoàn tất",
-    "submit_empty": "Flow không nhận lô prompt mới",
-    "browser_closed": "Cửa sổ Flow đã đóng",
-    "wrong_project": "Đang mở sai dự án Flow",
-    "completed": "Hoàn tất",
-    "stopped": "Đã dừng bởi người dùng",
-    "stopping": "Đang dừng",
-    "error": "Lỗi",
-}
-PHASE_NEXT_ACTIONS_VI = {
-    "flow_error": "Mở cửa sổ Flow thủ công, chờ cảnh báo unusual activity biến mất, rồi chạy lại chế độ tạo visual.",
-    "browser_closed": "Mở lại Flow, đăng nhập Google nếu được yêu cầu, rồi chạy lại chế độ tạo visual.",
-    "download_timeout": "Chờ 1-2 phút để Flow hoàn tất clip, rồi chạy lại chế độ tạo visual.",
-    "submit_empty": "Mở Flow và kiểm tra ô nhập prompt đang hoạt động, sau đó chạy lại chế độ tạo visual.",
-    "wrong_project": "Mở đúng dự án trong Flow, lưu lại URL dự án, rồi chạy lại chế độ tạo visual.",
-    "completed": "Tất cả prompt đã được xử lý. Bạn có thể kiểm tra thư mục clips_dir.",
-    "stopped": "Có thể chạy lại chế độ tạo visual khi sẵn sàng.",
-    "error": "Kiểm tra visual_worker.err.log trong _flow_veo_studio rồi chạy lại chế độ tạo visual.",
-}
+LOCAL_APPDATA = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+APP_CONFIG_DIR = Path(os.environ.get("FLOW_VEO_CONFIG_DIR") or (LOCAL_APPDATA / "FlowVeoStudio"))
+PROMPT_SETTINGS_PATH = APP_CONFIG_DIR / "prompt_settings.json"
+PROJECT_SETTINGS_PATH = APP_CONFIG_DIR / "project_settings.json"
+GOOGLE_AI_API_BASE = os.environ.get("GOOGLE_AI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+GOOGLE_AI_MODEL = os.environ.get("GOOGLE_AI_MODEL") or "gemini-3.5-flash"
+GOOGLE_AI_TEMPERATURE = float(os.environ.get("FLOW_PROMPT_TEMPERATURE", "0.4"))
+GOOGLE_AI_MAX_TOKENS = int(os.environ.get("FLOW_PROMPT_MAX_TOKENS", "4000"))
 
-
-def normalize_flow_url(url: str) -> str:
-    if not url:
-        return ""
-    base = str(url).strip().split("?", 1)[0].split("#", 1)[0]
-    base = base.rstrip("/")
-    # Flow can insert locale segments such as /ru/, /en/, or /uk/ between /fx/ and /tools.
-    base = re.sub(r"(/fx)/[a-z]{2}(?=/tools)", r"\1", base)
-    return base
-
-
-def clean_flow_project_url(url: str | None) -> str:
-    raw_url = (url or "").strip()
-    if not raw_url:
-        return ""
-    parts = urlsplit(raw_url)
-    if parts.scheme not in ("http", "https") or parts.netloc.lower() != "labs.google":
-        return ""
-    match = re.match(
-        r"^(/fx(?:/[a-z]{2})?/tools/flow/project/[^/?#/\s]+)",
-        parts.path.rstrip("/"),
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return ""
-    return urlunsplit((parts.scheme, parts.netloc, match.group(1), "", ""))
-
-
-def require_flow_project_url(url: str | None) -> str:
-    raw_url = (url or "").strip()
-    clean_url = clean_flow_project_url(raw_url)
-    if raw_url and not clean_url:
-        raise ValueError(
-            "URL dự án Flow phải là liên kết tới một dự án cụ thể: "
-            "https://labs.google/fx/ru/tools/flow/project/{id}"
-        )
-    return clean_url
-
-
-def is_on_flow_project(flow: FlowAutomation, expected_url: str) -> bool:
-    if not expected_url:
-        return True
-    current = flow.current_url() if hasattr(flow, "current_url") else None
-    if not current:
-        return False
-    return normalize_flow_url(current).startswith(normalize_flow_url(expected_url))
-
-
-def ensure_on_flow_project(flow: FlowAutomation, expected_url: str) -> bool:
-    if not expected_url:
-        return True
-    if is_on_flow_project(flow, expected_url):
-        return True
-    try:
-        flow.goto(expected_url, wait_ms=2000)
-    except Exception:
-        traceback.print_exc()
-        return False
-    return is_on_flow_project(flow, expected_url)
-VISUAL_JOB = {
-    "status": "idle",
-    "phase": "idle",
-    "phase_label": PHASE_LABELS_VI["idle"],
-    "next_action": "",
-    "message": "Tự động hoá visual đang chờ.",
-    "project_path": None,
-    "flow_project_url": None,
-    "batch_count": 30,
-    "started_at": None,
-    "updated_at": None,
-    "finished_at": None,
-    "stop_requested": False,
-    "counts": None,
-    "log": [],
-    "process": None,
-    "status_path": None,
-    "stop_path": None,
-    "browser": None,
-}
 EXTENSION_RUN_LOCK = threading.RLock()
 EXTENSION_RUN = {
     "status": "idle",
@@ -161,6 +72,7 @@ EXTENSION_RUN = {
     "audio_cue": None,
     "resume_phase": None,
     "counts": None,
+    "auto_mode": False,
     "log": [],
 }
 EXTENSION_FINAL_RETRY_MAX_ATTEMPTS = int(os.environ.get("FLOW_EXTENSION_FINAL_RETRY_MAX_ATTEMPTS", "3"))
@@ -175,6 +87,168 @@ def read_json(path: Path):
 def write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def secure_write_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception:
+        pass
+
+
+def load_prompt_settings() -> dict:
+    if not PROMPT_SETTINGS_PATH.exists():
+        return {}
+    try:
+        data = read_json(PROMPT_SETTINGS_PATH)
+    except Exception:
+        traceback.print_exc()
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_prompt_settings(updates: dict) -> dict:
+    settings = load_prompt_settings()
+    for key, value in updates.items():
+        if value is None:
+            settings.pop(key, None)
+        else:
+            settings[key] = value
+    settings["updated_at"] = utc_now()
+    secure_write_json(PROMPT_SETTINGS_PATH, settings)
+    return settings
+
+
+def configured_google_ai_key() -> str:
+    settings = load_prompt_settings()
+    return (
+        str(settings.get("google_ai_api_key") or "").strip()
+        or os.environ.get("GOOGLE_AI_API_KEY", "").strip()
+        or os.environ.get("GEMINI_API_KEY", "").strip()
+    )
+
+
+def configured_google_ai_model() -> str:
+    settings = load_prompt_settings()
+    return str(settings.get("google_ai_model") or GOOGLE_AI_MODEL).strip() or GOOGLE_AI_MODEL
+
+
+def configured_google_ai_base() -> str:
+    settings = load_prompt_settings()
+    return str(settings.get("google_ai_base") or GOOGLE_AI_API_BASE).strip().rstrip("/") or GOOGLE_AI_API_BASE
+
+
+def masked_secret_tail(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    return "****" + value[-4:]
+
+
+def public_prompt_settings() -> dict:
+    api_key = configured_google_ai_key()
+    return {
+        "provider": "google_ai_studio",
+        "configured": bool(api_key),
+        "api_key_tail": masked_secret_tail(api_key),
+        "model": configured_google_ai_model(),
+        "base_url": configured_google_ai_base(),
+        "settings_path": str(PROMPT_SETTINGS_PATH),
+    }
+
+
+def load_project_settings() -> dict:
+    if not PROJECT_SETTINGS_PATH.exists():
+        return {}
+    try:
+        data = read_json(PROJECT_SETTINGS_PATH)
+    except Exception:
+        traceback.print_exc()
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_project_settings(updates: dict) -> dict:
+    settings = load_project_settings()
+    for key, value in updates.items():
+        if value is None:
+            settings.pop(key, None)
+        else:
+            settings[key] = value
+    settings["updated_at"] = utc_now()
+    secure_write_json(PROJECT_SETTINGS_PATH, settings)
+    return settings
+
+
+def default_frames_path() -> str:
+    for key in ("FLOW_VEO_FRAMES_DIR", "FLOW_VEO_DEFAULT_FRAMES_DIR"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return str(Path(value))
+    local_default = ROOT / "projects" / "default" / "frames"
+    local_default.mkdir(parents=True, exist_ok=True)
+    return str(local_default)
+
+
+def configured_frames_path() -> str:
+    settings = load_project_settings()
+    return str(settings.get("frames_path") or default_frames_path()).strip()
+
+
+def same_frames_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    try:
+        return resolve_frames_project(left)["frames_dir"].resolve() == resolve_frames_project(right)["frames_dir"].resolve()
+    except Exception:
+        return str(left).strip().lower() == str(right).strip().lower()
+
+
+def public_project_settings() -> dict:
+    settings = load_project_settings()
+    frames_path = configured_frames_path()
+    state_flow_url = saved_flow_project_url(frames_path) if frames_path else ""
+    settings_flow_url = clean_flow_project_url(str(settings.get("flow_project_url") or ""))
+    return {
+        "frames_path": frames_path,
+        "flow_project_url": state_flow_url or settings_flow_url,
+        "project_name": str(settings.get("project_name") or "composer_project"),
+        "prompt_batch_count": int(settings.get("prompt_batch_count") or 20),
+        "visual_batch_count": int(settings.get("visual_batch_count") or EXTENSION_ROUND_BATCH),
+        "settings_path": str(PROJECT_SETTINGS_PATH),
+    }
+
+
+def save_project_settings_from_body(body: dict) -> dict:
+    current = public_project_settings()
+    frames_path = str(
+        body.get("frames_path")
+        or body.get("project_path")
+        or body.get("path")
+        or current.get("frames_path")
+        or ""
+    ).strip()
+    if not frames_path:
+        raise ValueError("Missing frames folder path.")
+
+    project = resolve_frames_project(frames_path)
+    frames_path = str(project["frames_dir"])
+    updates = {
+        "frames_path": frames_path,
+        "project_name": safe_project_name(str(body.get("project_name") or current.get("project_name") or "composer_project")),
+        "prompt_batch_count": max(1, int(body.get("prompt_batch_count") or current.get("prompt_batch_count") or 20)),
+        "visual_batch_count": max(1, int(body.get("visual_batch_count") or current.get("visual_batch_count") or EXTENSION_ROUND_BATCH)),
+    }
+
+    if "flow_project_url" in body or "url" in body:
+        flow_url = require_flow_project_url(body.get("flow_project_url") or body.get("url") or "")
+        updates["flow_project_url"] = flow_url
+        save_flow_project_url(frames_path, flow_url)
+
+    save_project_settings(updates)
+    return public_project_settings()
 
 
 def utc_now():
@@ -292,145 +366,31 @@ def save_flow_project_url(path_value: str, url: str | None) -> str:
     return str(state.get("flow_project_url") or "").strip()
 
 
-def load_channels():
-    channels = []
-    for path in sorted(CHANNELS_DIR.glob("*.json")):
-        item = read_json(path)
-        item["_file"] = path.name
-        channels.append(item)
-    return channels
+DEFAULT_SCRIPT_PROMPT_STYLE = (
+    "Create realistic, cinematic English prompts for Google Veo. "
+    "Adapt each script fragment into a concrete visual scene with varied camera scale, "
+    "practical motion, natural sound details, and no music, no dialogue, no voiceover. "
+    "Every prompt must start with the exact index marker in this format: \"#000,\"."
+)
 
-
-def fallback_channel(channel_id: str):
-    return {
-        "id": channel_id,
-        "name": channel_id,
-        "default_model": "gpt-5.4-mini",
-        "default_project_name": channel_id or "default_project",
-        "prompt_batch_size": 20,
-        "style_prompt": (
-            "You are a professional prompt writer for Google Veo. Create English video prompts "
-            "for the selected channel and adapt every scene to the meaning of the Russian script fragment. "
-            "Keep visuals realistic, cinematic, varied in camera scale, and practical for Google Flow. "
-            "Every prompt must start with the exact index in this format: \"#000,\". "
-            "Avoid subtitles, on-screen text, music, dialogue, speech, voiceover, and talking."
-        ),
-        "shot_cycle": [
-            "extreme close-up",
-            "close-up",
-            "medium shot",
-            "medium-wide shot",
-            "wide shot",
-            "overhead shot",
-        ],
-    }
-
-
-def load_channel(channel_id: str):
-    for channel in load_channels():
-        if channel.get("id") == channel_id:
-            return channel
-    return fallback_channel(channel_id)
-
-
-def natural_sort_key(value: str):
-    parts = re.split(r"(\d+)", value.lower())
-    key = []
-    for part in parts:
-        key.append(int(part) if part.isdigit() else part)
-    return key
-
-
-def infer_library_channel_id(channel):
-    for key in ("library_channel_id", "channel_folder", "folder"):
-        if channel.get(key):
-            return str(channel[key])
-    channel_id = str(channel.get("id", ""))
-    first = channel_id.split("_", 1)[0]
-    return first or channel_id
-
-
-def series_from_frames_path(path_value: str):
-    if not path_value:
-        return ""
-    path = Path(path_value)
-    frames_dir = path.parent if path.suffix.lower() == ".json" else path
-    if frames_dir.name.lower() == "frames":
-        return frames_dir.parent.name
-    return ""
-
-
-def list_library():
-    configured = load_channels()
-    styles_by_folder = {}
-    for channel in configured:
-        folder_id = infer_library_channel_id(channel)
-        styles_by_folder.setdefault(folder_id.lower(), []).append(channel)
-
-    folders = []
-    if LIBRARY_ROOT.exists():
-        try:
-            folders = [item for item in LIBRARY_ROOT.iterdir() if item.is_dir()]
-        except OSError:
-            folders = []
-
-    channels = []
-    for folder in sorted(folders, key=lambda item: natural_sort_key(item.name)):
-        styles = styles_by_folder.get(folder.name.lower(), [])
-        series = []
-        try:
-            series_dirs = [item for item in folder.iterdir() if item.is_dir()]
-        except OSError:
-            series_dirs = []
-        for series_dir in sorted(series_dirs, key=lambda item: natural_sort_key(item.name)):
-            frames_dir = series_dir / "frames"
-            series.append(
-                {
-                    "id": series_dir.name,
-                    "name": series_dir.name,
-                    "path": str(series_dir),
-                    "frames_path": str(frames_dir),
-                    "has_frames": frames_dir.is_dir(),
-                    "has_sentences": (frames_dir / "sentences.json").exists(),
-                }
-            )
-
-        preferred_style = styles[0] if styles else fallback_channel(folder.name)
-        preferred_series = series_from_frames_path(preferred_style.get("default_project_path", ""))
-        if not preferred_series:
-            usable = [item for item in series if item["has_frames"]]
-            preferred_series = usable[-1]["id"] if usable else (series[-1]["id"] if series else "")
-
-        channels.append(
-            {
-                "id": folder.name,
-                "name": folder.name,
-                "path": str(folder),
-                "configured": bool(styles),
-                "styles": styles or [fallback_channel(folder.name)],
-                "default_style_id": preferred_style.get("id", folder.name),
-                "series": series,
-                "default_series_id": preferred_series,
-            }
-        )
-
-    folder_ids = {item["id"].lower() for item in channels}
-    configured_without_folder = [
-        channel
-        for channel in configured
-        if infer_library_channel_id(channel).lower() not in folder_ids
-    ]
-    return {
-        "root": str(LIBRARY_ROOT),
-        "channels": channels,
-        "configured_without_folder": configured_without_folder,
-    }
+DEFAULT_SHOT_CYCLE = [
+    "extreme close-up",
+    "close-up",
+    "medium shot",
+    "medium-wide shot",
+    "wide shot",
+    "overhead shot",
+]
 
 
 def load_sentences(path_value: str):
     project = resolve_frames_project(path_value)
     path = project["sentences_path"]
     if not path.exists():
+        prompts_path = project["prompts_path"]
+        if prompts_path.exists():
+            prompts = load_existing_prompts(path_value)
+            return [{"index": int(p["index"]), "text": str(p.get("source_text", ""))} for p in prompts if "index" in p]
         raise FileNotFoundError(f"Không tìm thấy tệp sentences.json: {path}")
     data = read_json(path)
     if not isinstance(data, list):
@@ -483,9 +443,11 @@ def save_script_from_editor(path_value: str, script_text: str):
     items = parse_sentence_text(script_text)
     backup_path = None
     if path.exists():
-        backup_path = project["work_dir"] / f"sentences.before_gui_save_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        backup_path = project["work_dir"] / "sentences.backup.json"
         backup_path.parent.mkdir(parents=True, exist_ok=True)
-        backup_path.write_text(path.read_text(encoding="utf-8-sig"), encoding="utf-8")
+        if backup_path.exists():
+            backup_path.unlink()
+        path.rename(backup_path)
     write_json(path, items)
     return {
         "ok": True,
@@ -512,8 +474,11 @@ def load_existing_prompts(path_value: str):
 def project_status(path_value: str):
     project = resolve_frames_project(path_value)
     project_state = load_project_state(path_value)
-    sentences = load_sentences(path_value)
     existing = load_existing_prompts(path_value)
+    try:
+        sentences = load_sentences(path_value)
+    except FileNotFoundError:
+        sentences = [{"index": int(p["index"]), "text": str(p.get("source_text", ""))} for p in existing if "index" in p]
     sentence_indexes = [int(item["index"]) for item in sentences]
     generated_indexes = {
         int(item["index"])
@@ -589,15 +554,14 @@ def with_neighbors(sentences, selected):
     return result
 
 
-def build_user_prompt(items, channel, style_override: str):
-    style = style_override.strip() if style_override.strip() else channel.get("style_prompt", "")
-    shot_cycle = channel.get("shot_cycle", [])
+def build_user_prompt(items, style_override: str = ""):
+    style = style_override.strip() or DEFAULT_SCRIPT_PROMPT_STYLE
     return (
-        "Generate Google Veo prompts for these Russian script fragments.\n\n"
-        "Use this channel style as the highest priority:\n"
+        "Generate Google Veo prompts for these script fragments.\n\n"
+        "Use this project prompt style as the highest priority:\n"
         f"{style}\n\n"
         "Use previous/current/next text to understand the meaning. The current text is the main target.\n"
-        "Do not make a literal translation. Invent a visual scene that fits the sentence and the channel.\n"
+        "Do not make a literal translation. Invent a visual scene that fits the source text.\n"
         "Return JSON only through the required schema.\n\n"
         "Rules for each item:\n"
         "- index must match the input index.\n"
@@ -608,30 +572,34 @@ def build_user_prompt(items, channel, style_override: str):
         "- Include ASMR natural sound details.\n"
         "- Explicitly include: no music, no dialogue, no voiceover.\n"
         "- Do not include quotes around the prompt text inside veo_prompt.\n\n"
-        f"Preferred shot cycle: {json.dumps(shot_cycle, ensure_ascii=False)}\n\n"
+        f"Preferred shot cycle: {json.dumps(DEFAULT_SHOT_CYCLE, ensure_ascii=False)}\n\n"
         "Script fragments:\n"
         f"{json.dumps(items, ensure_ascii=False, indent=2)}"
     )
 
 
-def openai_extract_text(response_data):
-    if response_data.get("output_text"):
-        return response_data["output_text"]
-
-    chunks = []
-    for output in response_data.get("output", []):
-        for content in output.get("content", []):
-            if "text" in content:
-                chunks.append(content["text"])
-    return "".join(chunks)
+def strip_model_fence(text: str) -> str:
+    value = (text or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json|JSON)?\s*", "", value)
+        value = re.sub(r"\s*```$", "", value)
+    return value.strip()
 
 
-def call_openai(model: str, system_prompt: str, user_prompt: str):
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Chưa thiết lập OPENAI_API_KEY trong biến môi trường Windows")
+def parse_model_json_object(text: str):
+    value = strip_model_fence(text)
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        start = value.find("{")
+        end = value.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(value[start : end + 1])
+        raise
 
-    schema = {
+
+def google_ai_prompt_schema() -> dict:
+    return {
         "type": "object",
         "additionalProperties": False,
         "required": ["prompts"],
@@ -652,43 +620,399 @@ def call_openai(model: str, system_prompt: str, user_prompt: str):
         },
     }
 
-    payload = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "veo_prompt_batch",
-                "strict": True,
-                "schema": schema,
-            }
-        },
-        "max_output_tokens": 8000,
-    }
 
+def google_ai_model_path(model: str | None) -> str:
+    clean = (model or configured_google_ai_model()).strip()
+    if clean.startswith("models/"):
+        return clean
+    return f"models/{clean}"
+
+
+def google_ai_generate_url(model: str | None) -> str:
+    api_key = configured_google_ai_key()
+    if not api_key:
+        raise RuntimeError("Google AI Studio API key is not configured.")
+    return f"{configured_google_ai_base()}/{google_ai_model_path(model)}:generateContent?{urlencode({'key': api_key})}"
+
+
+def extract_google_ai_text(response_data: dict) -> str:
+    chunks = []
+    for candidate in response_data.get("candidates", []):
+        content = candidate.get("content") or {}
+        for part in content.get("parts", []):
+            if part.get("text"):
+                chunks.append(str(part["text"]))
+    return "".join(chunks).strip()
+
+
+def post_google_ai_generate(payload: dict, model: str | None = None, timeout: int = 180) -> dict:
     req = request.Request(
-        "https://api.openai.com/v1/responses",
+        google_ai_generate_url(model),
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with request.urlopen(req, timeout=180) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        with request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Lỗi OpenAI API {exc.code}: {detail}") from exc
+        raise RuntimeError(f"Google AI Studio API error {exc.code}: {detail}") from exc
 
-    output_text = openai_extract_text(data)
+
+def call_google_ai_text(system_prompt: str, user_prompt: str, model: str | None = None):
+    schema = google_ai_prompt_schema()
+    payload = {
+        "systemInstruction": {
+            "parts": [
+                {
+                    "text": (
+                        system_prompt
+                        + "\nReturn only a JSON object that follows this schema: "
+                        + json.dumps(schema)
+                    )
+                }
+            ]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": GOOGLE_AI_TEMPERATURE,
+            "maxOutputTokens": GOOGLE_AI_MAX_TOKENS,
+        },
+    }
+    data = post_google_ai_generate(payload, model=model)
+    output_text = extract_google_ai_text(data)
     if not output_text:
-        raise RuntimeError(f"Phản hồi OpenAI không có output text: {data}")
-    return json.loads(output_text)
+        raise RuntimeError(f"Google AI Studio returned no text: {data}")
+    return parse_model_json_object(output_text)
+
+
+def call_google_ai_vision(
+    image_bytes: bytes,
+    mime_type: str,
+    system_prompt: str,
+    user_prompt: str,
+    model: str | None = None,
+) -> str:
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": user_prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64.b64encode(image_bytes).decode("ascii"),
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": GOOGLE_AI_TEMPERATURE,
+            "maxOutputTokens": GOOGLE_AI_MAX_TOKENS,
+        },
+    }
+    data = post_google_ai_generate(payload, model=model)
+    output_text = extract_google_ai_text(data)
+    if not output_text:
+        raise RuntimeError(f"Google AI Studio returned no vision text: {data}")
+    return strip_model_fence(output_text)
+
+COMPOSER_PLATFORMS = {
+    "veo_3_1": {
+        "label": "Veo 3.1",
+        "target": "Google Veo 3.1 / Flow",
+        "audio_rule": "Include natural production sound when useful; no music, no dialogue, no voiceover.",
+    },
+}
+
+COMPOSER_ORIENTATIONS = {
+    "landscape": "horizontal 16:9",
+    "portrait": "vertical 9:16",
+}
+
+
+def composer_platform(platform_id: str | None) -> dict:
+    return COMPOSER_PLATFORMS.get(platform_id or "", COMPOSER_PLATFORMS["veo_3_1"])
+
+
+def composer_orientation(orientation_id: str | None) -> str:
+    return COMPOSER_ORIENTATIONS.get(orientation_id or "", COMPOSER_ORIENTATIONS["landscape"])
+
+
+def composer_model(body: dict) -> str:
+    return str(body.get("model") or body.get("prompt_model") or configured_google_ai_model()).strip() or configured_google_ai_model()
+
+
+def slugify_title(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9_]+", "_", (value or "").lower()).strip("_")
+    slug = re.sub(r"_+", "_", slug)
+    return slug[:80].strip("_") or fallback
+
+
+def next_prompt_index(project_path: str) -> int:
+    try:
+        existing = load_existing_prompts(project_path)
+    except Exception:
+        existing = []
+    indexes = [int(item["index"]) for item in existing if isinstance(item, dict) and "index" in item]
+    return max(indexes) + 1 if indexes else 0
+
+
+def decode_data_url(data_url: str) -> tuple[str, bytes]:
+    if "," in data_url:
+        header, encoded = data_url.split(",", 1)
+        match = re.search(r"data:([^;]+)", header)
+        mime_type = match.group(1) if match else "image/png"
+    else:
+        encoded = data_url
+        mime_type = "image/png"
+    return mime_type, base64.b64decode(encoded)
+
+
+def safe_upload_filename(filename: str, index: int, mime_type: str) -> str:
+    raw_name = Path(filename or "").name
+    suffix = Path(raw_name).suffix.lower()
+    if not suffix:
+        suffix = mimetypes.guess_extension(mime_type) or ".png"
+    stem = slugify_title(Path(raw_name).stem, f"image_{index:03d}")
+    return f"{stem}{suffix}"
+
+
+def normalize_prompt_marker(index: int, prompt: str) -> str:
+    value = strip_model_fence(prompt).strip().strip('"')
+    value = re.sub(r"^\s*#?\d{1,4}\s*,?\s*", "", value)
+    if not value:
+        raise RuntimeError("AI returned an empty prompt")
+    return f"#{index:03d}, {value}"
+
+
+def append_required_audio_rule(platform: dict, prompt: str) -> str:
+    if platform.get("target") != COMPOSER_PLATFORMS["veo_3_1"]["target"]:
+        return prompt
+    lowered = prompt.lower()
+    required = "no music, no dialogue, no voiceover"
+    if required not in lowered:
+        prompt = prompt.rstrip(" .") + f", {required}."
+    return prompt
+
+
+def build_composer_ai_request(index: int, body: dict, image_context: str | None = None) -> tuple[str, str]:
+    user_prompt = str(body.get("prompt") or "").strip()
+    platform = composer_platform(str(body.get("platform") or "veo_3_1"))
+    orientation = composer_orientation(str(body.get("orientation") or "landscape"))
+    mode = str(body.get("mode") or "text_to_video")
+
+    system_prompt = (
+        "You are a senior video prompt writer. Create production-ready prompts for video generation. "
+        "Return structured JSON only."
+    )
+    user_parts = [
+        f"Create exactly one prompt item for index {index}.",
+        f"Mode: {mode}.",
+        f"Target platform: {platform['target']}.",
+        f"Aspect/orientation: {orientation}.",
+        "Improvise from the user input instead of merely rephrasing it.",
+        "The scene must be concrete, cinematic, physically plausible, and easy for a video model to follow.",
+        "Describe subject, setting, camera shot or movement, lighting, visible motion, and mood.",
+        platform["audio_rule"],
+        f'veo_prompt must start with "#{index:03d}," exactly.',
+        "title_slug must be lowercase English words joined by underscores, 4-8 words, no index.",
+    ]
+    if user_prompt:
+        user_parts.append(f"User text: {user_prompt}")
+    if image_context:
+        user_parts.append(
+            "Image reference description. Preserve the important visible subject, composition, colors, "
+            f"and mood from this reference while turning it into video motion: {image_context}"
+        )
+    return system_prompt, "\n".join(user_parts)
+
+
+def composer_item_from_ai(index: int, body: dict, source_text: str, raw_item: dict, source_images=None) -> dict:
+    platform_id = str(body.get("platform") or "veo_3_1")
+    mode = str(body.get("mode") or "text_to_video")
+    orientation_id = str(body.get("orientation") or "landscape")
+    platform = composer_platform(platform_id)
+    prompt = normalize_prompt_marker(index, str(raw_item.get("veo_prompt") or ""))
+    prompt = append_required_audio_rule(platform, prompt)
+    slug_seed = raw_item.get("title_slug") or source_text or prompt
+    slug = slugify_title(str(slug_seed), f"scene_{index:03d}")
+    item = {
+        "index": index,
+        "source_text": source_text,
+        "title_slug": slug,
+        "flow_title": f"{index:03d}_{slug}",
+        "veo_prompt": prompt,
+        "status": "prompt_ready",
+        "attempts": 0,
+        "regen_count": 0,
+        "downloaded_path": "",
+        "flow_error": "",
+        "platform": platform_id,
+        "platform_label": platform["label"],
+        "generation_mode": mode,
+        "orientation": orientation_id,
+    }
+    if source_images:
+        item["source_images"] = list(source_images)
+    return item
+
+
+def composer_raw_prompt_to_item(index: int, body: dict, source_text: str, prompt_text: str, source_images=None) -> dict:
+    return composer_item_from_ai(
+        index,
+        body,
+        source_text,
+        {
+            "title_slug": source_text or f"scene_{index:03d}",
+            "veo_prompt": prompt_text,
+        },
+        source_images=source_images,
+    )
+
+
+def generate_text_composer_item(index: int, body: dict) -> dict:
+    system_prompt, user_prompt = build_composer_ai_request(index, body)
+    raw = call_google_ai_text(system_prompt, user_prompt, composer_model(body))
+    prompts = raw.get("prompts") or []
+    if not prompts:
+        raise RuntimeError("AI did not return any prompt items")
+    source_text = str(body.get("prompt") or "").strip()
+    return composer_item_from_ai(index, body, source_text, prompts[0])
+
+
+def generate_image_composer_item(index: int, body: dict, image_bytes: bytes, mime_type: str, source_text: str, source_images) -> dict:
+    platform = composer_platform(str(body.get("platform") or "veo_3_1"))
+    orientation = composer_orientation(str(body.get("orientation") or "landscape"))
+    system_prompt = (
+        "You are a senior video prompt writer with image understanding. "
+        "Analyze the reference image and output only one final English video-generation prompt."
+    )
+    user_prompt = (
+        f"Target platform: {platform['target']}.\n"
+        f"Aspect/orientation: {orientation}.\n"
+        f"User text: {source_text or 'Use the image as the main creative reference.'}\n"
+        "Create a cinematic video prompt grounded in the visible image. Include subject, setting, camera movement, "
+        f"lighting, motion, mood, and this audio rule: {platform['audio_rule']} "
+        f"The prompt may include the marker #{index:03d}, but no title, commentary, markdown, or JSON."
+    )
+    prompt_text = call_google_ai_vision(image_bytes, mime_type, system_prompt, user_prompt, composer_model(body))
+    return composer_raw_prompt_to_item(index, body, source_text, prompt_text, source_images=source_images)
+
+
+def generate_composer_prompts(body: dict):
+    project_path = body.get("project_path") or body.get("path")
+    if not project_path:
+        raise ValueError("Thiếu project_path")
+
+    mode = str(body.get("mode") or "text_to_video")
+    prompt = str(body.get("prompt") or "").strip()
+    images = body.get("images") or []
+    if not prompt and mode == "text_to_video":
+        raise ValueError("Hãy nhập prompt trước khi tạo Text To Video")
+    if mode == "text_image_to_video" and not images:
+        raise ValueError("Hãy chọn ít nhất một hình ảnh cho Text + Image to Video")
+
+    project = resolve_frames_project(project_path)
+    project["frames_dir"].mkdir(parents=True, exist_ok=True)
+
+    start_index = next_prompt_index(project_path)
+    generated = []
+    source_images = []
+
+    if mode == "text_image_to_video":
+        upload_dir = project["work_dir"] / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        for offset, image in enumerate(images):
+            filename = str(image.get("filename") or f"image_{offset:03d}.png")
+            data_url = str(image.get("base64") or "")
+            if not data_url:
+                continue
+            index = start_index + len(generated)
+            mime_type, image_bytes = decode_data_url(data_url)
+            safe_name = safe_upload_filename(filename, index, mime_type)
+            image_path = upload_dir / f"{index:03d}_{safe_name}"
+            image_path.write_bytes(image_bytes)
+            source_images.append(str(image_path))
+            item = generate_image_composer_item(
+                index,
+                body,
+                image_bytes,
+                mime_type,
+                prompt or filename,
+                [str(image_path)],
+            )
+            generated.append(item)
+    else:
+        # Batch: split input by lines, send all in one API call
+        lines = [line.strip() for line in prompt.splitlines() if line.strip()]
+        if len(lines) > 1:
+            system_prompt = (
+                "You are a senior video prompt writer. "
+                "Generate Veo video prompts for EACH of the following user items. "
+                "Output a JSON array with objects containing 'index', 'veo_prompt', and 'title_slug'. "
+                "Keep prompts cinematic, practical, and include appropriate audio instructions."
+            )
+            user_lines = "\n".join(f"[{i}] {line}" for i, line in enumerate(lines))
+            user_prompt = (
+                f"Target platform: Google Veo 3.1 / Flow.\n"
+                f"Aspect/orientation: {composer_orientation(str(body.get('orientation') or 'landscape'))}.\n"
+                f"Generate one video prompt per item below. Number them starting from 0.\n\n{user_lines}"
+            )
+            model = composer_model(body)
+            raw = call_google_ai_text(system_prompt, user_prompt, model)
+            raw_prompts = raw.get("prompts") or []
+            for offset, line_text in enumerate(lines):
+                index = start_index + len(generated)
+                raw_item = raw_prompts[offset] if offset < len(raw_prompts) else {}
+                source_text = line_text
+                prompt_text = normalize_prompt_marker(index, str(raw_item.get("veo_prompt") or line_text))
+                platform = composer_platform(str(body.get("platform") or "veo_3_1"))
+                prompt_text = append_required_audio_rule(platform, prompt_text)
+                slug_seed = raw_item.get("title_slug") or source_text or prompt_text
+                slug = slugify_title(str(slug_seed), f"scene_{index:03d}")
+                item = {
+                    "index": index,
+                    "source_text": source_text,
+                    "title_slug": slug,
+                    "flow_title": f"{index:03d}_{slug}",
+                    "veo_prompt": prompt_text,
+                    "status": "prompt_ready",
+                    "attempts": 0,
+                    "platform": str(body.get("platform") or "veo_3_1"),
+                }
+                if body.get("images"):
+                    item["source_images"] = source_images
+                generated.append(item)
+        else:
+            generated.append(generate_text_composer_item(start_index, body))
+
+    if not generated:
+        raise ValueError("Không tạo được prompt nào")
+
+    project_name = body.get("project_name") or "composer_project"
+    prompts_path, all_prompts = merge_project_prompts(project_path, project_name, generated)
+    return {
+        "saved_to": str(prompts_path),
+        "frames_dir": str(project["frames_dir"]),
+        "clips_dir": str(project["clips_dir"]),
+        "source_images": source_images,
+        "generated": generated,
+        "prompts": all_prompts,
+        "status": project_status(project_path),
+    }
 
 
 def normalize_generated(raw_prompts, selected_by_index):
@@ -769,7 +1093,6 @@ def flow_queue_status(project_path: str):
         None,
     )
     return {
-        "browser": FLOW.status(),
         "prompts_path": str(project["prompts_path"]),
         "clips_dir": str(project["clips_dir"]),
         "total_prompts": len(prompts),
@@ -876,11 +1199,6 @@ def active_submitted_count(project_path: str, max_age_seconds: int):
     return active, stale
 
 
-def visual_snapshot_is_active(snapshot: dict | None = None) -> bool:
-    snapshot = snapshot or visual_job_snapshot()
-    return bool(snapshot.get("process_running")) or snapshot.get("status") in {"running", "recovering", "stopping"}
-
-
 def extension_add_log_unlocked(message: str) -> None:
     if not message:
         return
@@ -907,15 +1225,6 @@ def extension_snapshot(project_path: str | None = None):
         except Exception as exc:
             snapshot["queue_error"] = str(exc)
 
-    visual_snapshot = visual_job_snapshot()
-    snapshot["visual_job_active"] = visual_snapshot_is_active(visual_snapshot)
-    snapshot["visual_job"] = {
-        "status": visual_snapshot.get("status"),
-        "phase": visual_snapshot.get("phase"),
-        "message": visual_snapshot.get("message"),
-        "project_path": visual_snapshot.get("project_path"),
-        "process_running": visual_snapshot.get("process_running", False),
-    }
     return snapshot
 
 
@@ -960,11 +1269,6 @@ def revive_auto_failed_prompts(project_path: str):
 
 
 def start_extension_run(project_path: str, batch_count: int, flow_project_url: str | None = None):
-    visual_snapshot = visual_job_snapshot()
-    if visual_snapshot_is_active(visual_snapshot):
-        raise RuntimeError(
-            "Visual worker Chrome/CDP đang hoạt động. Hãy dừng nó trước khi khởi động chế độ tiện ích."
-        )
     if flow_project_url:
         save_flow_project_url(project_path, flow_project_url)
     revived = revive_auto_failed_prompts(project_path)
@@ -1058,12 +1362,6 @@ def extension_next_prompt():
         phase = EXTENSION_RUN.get("phase")
         if phase != "submitting":
             return {"prompt": None, "reason": "wait_phase", "phase": phase, **extension_snapshot(project_path)}
-
-    visual_snapshot = visual_job_snapshot()
-    if visual_snapshot_is_active(visual_snapshot):
-        raise RuntimeError(
-            "Visual worker Chrome/CDP đang hoạt động. Chế độ tiện ích tạm dừng để tránh chạy hai visual worker."
-        )
 
     counts = flow_queue_status(project_path).get("counts", {})
     prompts = load_existing_prompts(project_path)
@@ -1241,18 +1539,30 @@ def report_extension_phase_done(project_path: str, phase: str):
     phase = (phase or "").strip().lower()
     counts = flow_queue_status(project_path).get("counts", {})
     unresolved = extension_unresolved(project_path)
+    auto_mode = bool(EXTENSION_RUN.get("auto_mode", False))
+
     if phase == "submit":
         submitted = int(counts.get("submitted") or 0)
         ready = int(counts.get("prompt_ready") or 0)
         if submitted:
-            return set_extension_run(
-                phase="awaiting_download",
-                counts=counts,
-                awaiting_user_action=True,
-                pending_action="start_download",
-                audio_cue="submit_done",
-                message=f"Pha gửi prompt đã hoàn tất. Đang chờ bạn bắt đầu tải xuống thủ công cho {submitted} clip đã gửi.",
-            )
+            if auto_mode:
+                return set_extension_run(
+                    phase="downloading",
+                    counts=counts,
+                    awaiting_user_action=False,
+                    pending_action=None,
+                    audio_cue=None,
+                    message="Tất cả prompt đã gửi. Tự động chuyển sang pha tải xuống.",
+                )
+            else:
+                return set_extension_run(
+                    phase="awaiting_download",
+                    counts=counts,
+                    awaiting_user_action=True,
+                    pending_action="start_download",
+                    audio_cue="submit_done",
+                    message=f"Pha gửi prompt đã hoàn tất. Đang chờ bạn bắt đầu tải xuống thủ công cho {submitted} clip đã gửi.",
+                )
         if ready:
             return set_extension_run(
                 phase="submitting",
@@ -1266,19 +1576,70 @@ def report_extension_phase_done(project_path: str, phase: str):
     if phase == "download":
         if unresolved["total"] <= 0:
             return complete_extension_run(project_path, "Chế độ visual bằng tiện ích đã hoàn tất: tất cả clip đã được tải xuống.")
-        pending_action = "start_regen" if unresolved["regenerable_count"] > 0 else "complete"
-        message = (
-            f"Pha tải xuống đã hoàn tất. Còn {unresolved['total']} prompt chưa xử lý; "
-            f"{unresolved['regenerable_count']} prompt có thể tạo lại."
-        )
-        return set_extension_run(
-            phase="awaiting_regen",
-            counts=counts,
-            awaiting_user_action=True,
-            pending_action=pending_action,
-            audio_cue="download_done",
-            message=message,
-        )
+        if auto_mode:
+            if unresolved["regenerable_count"] > 0:
+                regenerable = set(unresolved["regenerable_indexes"])
+                exhausted = set(unresolved["exhausted_indexes"])
+                project = resolve_frames_project(project_path)
+                prompts = load_existing_prompts(project_path)
+                now = utc_now()
+                regenerated = []
+                for item in prompts:
+                    if item.get("status") == "downloaded" or "index" not in item:
+                        continue
+                    idx = int(item["index"])
+                    if idx in regenerable:
+                        previous_status = item.get("status")
+                        item["status"] = "prompt_ready"
+                        item["regen_count"] = int(item.get("regen_count") or 0) + 1
+                        item["flow_error_previous_status"] = previous_status
+                        item["flow_error"] = "auto_regen_requested"
+                        item["flow_error_at"] = now
+                        item.pop("submitted_at", None)
+                        item.pop("retry_after", None)
+                        regenerated.append(idx)
+                    elif idx in exhausted:
+                        previous_status = item.get("status")
+                        item["status"] = "failed"
+                        item["failed_at"] = now
+                        item["flow_error"] = "regen_limit_exhausted"
+                        item["flow_error_at"] = now
+                        item["flow_error_previous_status"] = previous_status
+                write_json(project["prompts_path"], prompts)
+                new_counts = flow_queue_status(project_path).get("counts", {})
+                return set_extension_run(
+                    phase="submitting",
+                    counts=new_counts,
+                    awaiting_user_action=False,
+                    pending_action=None,
+                    audio_cue=None,
+                    message=f"Đã tự động đưa {len(regenerated)} prompt lỗi/thiếu vào hàng đợi tạo lại.",
+                )
+            else:
+                failed = _mark_unresolved_failed(project_path, unresolved["indexes"], "extension_completed_without_regen")
+                return complete_extension_run(
+                    project_path,
+                    (
+                        "Chế độ tiện ích hoàn tất tự động."
+                        if not failed
+                        else "Chế độ tiện ích hoàn tất tự động. Không thể tạo được: "
+                        + ", ".join(f"#{int(idx):03d}" for idx in failed)
+                    ),
+                )
+        else:
+            pending_action = "start_regen" if unresolved["regenerable_count"] > 0 else "complete"
+            message = (
+                f"Pha tải xuống đã hoàn tất. Còn {unresolved['total']} prompt chưa xử lý; "
+                f"{unresolved['regenerable_count']} prompt có thể tạo lại."
+            )
+            return set_extension_run(
+                phase="awaiting_regen",
+                counts=counts,
+                awaiting_user_action=True,
+                pending_action=pending_action,
+                audio_cue="download_done",
+                message=message,
+            )
 
     raise ValueError(f"Báo cáo pha tiện ích không được hỗ trợ: {phase}")
 
@@ -1420,90 +1781,6 @@ def mark_flow_error_prompts_ready(project_path: str, flow_errors):
     return updated
 
 
-def submit_ready_flow_batch(project_path: str, count: int, delay_seconds: float, flow: FlowAutomation | None = None):
-    flow = flow or FLOW
-    if not flow.is_open:
-        raise RuntimeError("Trình duyệt Flow chưa mở. Hãy mở Flow trước.")
-    project = resolve_frames_project(project_path)
-    prompts_path = project["prompts_path"]
-    existing_errors = flow.visible_flow_errors()
-    blocked_prompts = mark_flow_error_prompts_ready(project_path, existing_errors)
-    if existing_errors:
-        return {
-            "submitted": [],
-            "blocked_prompts": blocked_prompts,
-            "flow_errors": existing_errors,
-            "message": (
-                "Flow đang hiển thị cảnh báo unusual activity. "
-                "Đã dừng trước khi gửi thêm prompt; các mục submitted bị ảnh hưởng đã được đưa về prompt_ready."
-            ),
-            **flow_queue_status(project_path),
-        }
-
-    prompts = load_existing_prompts(project_path)
-    ready = [item for item in prompts if item.get("status") == "prompt_ready" and item.get("veo_prompt")]
-    selected = ready[:count]
-    if not selected:
-        return {
-            "submitted": [],
-            "blocked_prompts": [],
-            "message": "Không tìm thấy mục prompt_ready.",
-            **flow_queue_status(project_path),
-        }
-
-    submitted = []
-    blocked_prompts = []
-    flow_errors = []
-    for item in selected:
-        flow.submit_prompt(item["veo_prompt"], delay_seconds=delay_seconds)
-        item["attempts"] = int(item.get("attempts", 0)) + 1
-        current_errors = flow.visible_flow_errors()
-        matching_errors = [
-            error_item for error_item in current_errors
-            if error_item.get("index") is None or int(error_item["index"]) == int(item["index"])
-        ]
-        if matching_errors:
-            item["status"] = "prompt_ready"
-            item["flow_error"] = matching_errors[0].get("message") or "Lỗi Flow"
-            item["flow_error_at"] = utc_now()
-            item["flow_error_previous_status"] = "submitted"
-            blocked_prompts.append(
-                {
-                    "index": item["index"],
-                    "flow_title": item.get("flow_title"),
-                    "previous_status": "submitted",
-                    "status": item["status"],
-                    "error": item["flow_error"],
-                }
-            )
-            flow_errors = current_errors
-            write_json(prompts_path, prompts)
-            break
-
-        item["status"] = "submitted"
-        item["submitted_at"] = utc_now()
-        item.pop("flow_error", None)
-        item.pop("flow_error_at", None)
-        item.pop("flow_error_previous_status", None)
-        submitted.append({"index": item["index"], "flow_title": item.get("flow_title")})
-        write_json(prompts_path, prompts)
-
-    if blocked_prompts:
-        message = (
-            f"Đã gửi {len(submitted)} prompt vào Flow, sau đó dừng do cảnh báo unusual activity."
-        )
-    else:
-        message = f"Đã gửi {len(submitted)} prompt vào Flow."
-
-    return {
-        "submitted": submitted,
-        "blocked_prompts": blocked_prompts,
-        "flow_errors": flow_errors,
-        "message": message,
-        **flow_queue_status(project_path),
-    }
-
-
 def update_downloaded_prompts(project_path: str, downloaded):
     project = resolve_frames_project(project_path)
     prompts_path = project["prompts_path"]
@@ -1548,31 +1825,6 @@ def update_downloaded_prompts(project_path: str, downloaded):
         "downloaded": downloaded,
         **flow_queue_status(project_path),
     }
-
-
-def download_all_flow_clips(project_path: str, count: int, flow: FlowAutomation | None = None):
-    flow = flow or FLOW
-    project = resolve_frames_project(project_path)
-    prompts = load_existing_prompts(project_path)
-    flow_errors = flow.visible_flow_errors()
-    blocked_prompts = mark_flow_error_prompts_ready(project_path, flow_errors)
-    prompts = load_existing_prompts(project_path)
-    names_by_index = {
-        int(item["index"]): f"clip_{int(item['index']):04d}"
-        for item in prompts
-        if "index" in item and item.get("status") != "downloaded"
-    }
-    downloaded = flow.download_all_visible_with_scroll(
-        project["clips_dir"],
-        project["downloads_dir"],
-        names_by_index,
-        max_count=count,
-    )
-    result = update_downloaded_prompts(project_path, downloaded)
-    result["message"] = f"Đã xử lý {len(downloaded)} mục tải xuống Flow bằng auto-scroll."
-    result["blocked_prompts"] = blocked_prompts + result.get("blocked_prompts", [])
-    result["flow_errors"] = flow_errors
-    return result
 
 
 def _is_video_file(path: Path):
@@ -1867,649 +2119,6 @@ def reset_lost_submitted(
     return reset
 
 
-def visual_job_paths(project_path: str):
-    project = resolve_frames_project(project_path)
-    return {
-        "status_path": project["work_dir"] / "visual_job_status.json",
-        "stop_path": project["work_dir"] / "visual_job_stop.flag",
-        "stdout_path": project["work_dir"] / "visual_worker.out.log",
-        "stderr_path": project["work_dir"] / "visual_worker.err.log",
-    }
-
-
-def visual_job_payload_unlocked():
-    snapshot = dict(VISUAL_JOB)
-    snapshot.pop("thread", None)
-    process = snapshot.pop("process", None)
-    if process is not None:
-        snapshot["pid"] = process.pid
-        snapshot["process_running"] = process.poll() is None
-    snapshot["log"] = list(VISUAL_JOB.get("log", []))
-    for key in ("status_path", "stop_path"):
-        if snapshot.get(key) is not None:
-            snapshot[key] = str(snapshot[key])
-    return snapshot
-
-
-def write_visual_job_status_unlocked():
-    status_path = VISUAL_JOB.get("status_path")
-    if not status_path:
-        return
-    try:
-        status_path = Path(status_path)
-        status_path.parent.mkdir(parents=True, exist_ok=True)
-        status_path.write_text(
-            json.dumps(visual_job_payload_unlocked(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except Exception:
-        traceback.print_exc()
-
-
-def read_visual_job_status_file(path):
-    if not path:
-        return None
-    try:
-        path = Path(path)
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8-sig"))
-    except Exception:
-        traceback.print_exc()
-    return None
-
-
-def visual_job_snapshot():
-    with VISUAL_JOB_LOCK:
-        snapshot = visual_job_payload_unlocked()
-        file_snapshot = read_visual_job_status_file(VISUAL_JOB.get("status_path"))
-        if file_snapshot:
-            snapshot.update(file_snapshot)
-            snapshot["log"] = file_snapshot.get("log", snapshot.get("log", []))
-        snapshot["browser"] = snapshot.get("browser") or FLOW.status()
-        return snapshot
-
-
-def set_visual_job(**updates):
-    with VISUAL_JOB_LOCK:
-        VISUAL_JOB.update(updates)
-        VISUAL_JOB["updated_at"] = utc_now()
-        phase = VISUAL_JOB.get("phase") or "idle"
-        VISUAL_JOB["phase_label"] = PHASE_LABELS_VI.get(phase, phase)
-        status = VISUAL_JOB.get("status")
-        if status in {"paused", "error", "completed", "stopped"}:
-            VISUAL_JOB["next_action"] = PHASE_NEXT_ACTIONS_VI.get(phase, "")
-        else:
-            VISUAL_JOB["next_action"] = ""
-        message = updates.get("message")
-        if message:
-            log = VISUAL_JOB.setdefault("log", [])
-            log.append({"at": VISUAL_JOB["updated_at"], "message": message})
-            del log[:-40]
-        write_visual_job_status_unlocked()
-
-
-def visual_job_stop_requested():
-    with VISUAL_JOB_LOCK:
-        stop_path = VISUAL_JOB.get("stop_path")
-        if stop_path and Path(stop_path).exists():
-            return True
-        return bool(VISUAL_JOB.get("stop_requested"))
-
-
-def sleep_visual_job(seconds: float) -> bool:
-    deadline = time.time() + max(0.0, seconds)
-    while time.time() < deadline:
-        if visual_job_stop_requested():
-            return False
-        time.sleep(min(1.0, deadline - time.time()))
-    return not visual_job_stop_requested()
-
-
-def visual_job_has_active_thread():
-    process = VISUAL_JOB.get("process")
-    if process is not None:
-        return process.poll() is None
-    thread = VISUAL_JOB.get("thread")
-    return thread is not None and thread.is_alive()
-
-
-def visual_job_flow_errors(project_path: str, flow: FlowAutomation):
-    if not flow.is_open and not flow.try_recover_page():
-        return None, []
-    try:
-        errors = flow.visible_flow_errors()
-    except Exception:
-        traceback.print_exc()
-        if not flow.try_recover_page():
-            return None, []
-        try:
-            errors = flow.visible_flow_errors()
-        except Exception:
-            traceback.print_exc()
-            return None, []
-    blocked = mark_flow_error_prompts_ready(project_path, errors)
-    return errors, blocked
-
-
-def reopen_flow_for_visual_job(flow: FlowAutomation, project_path: str, flow_project_url: str | None = None) -> bool:
-    if flow.is_open or flow.try_recover_page():
-        if flow_project_url and not is_on_flow_project(flow, flow_project_url):
-            ensure_on_flow_project(flow, flow_project_url)
-        return flow.is_open
-    try:
-        project = resolve_frames_project(project_path)
-        flow.open(project["downloads_dir"], flow_project_url or None)
-    except Exception:
-        traceback.print_exc()
-        return False
-    return flow.is_open
-
-
-def recover_flow_for_visual_job(project_path: str, flow: FlowAutomation, max_seconds: int = 300, flow_project_url: str | None = None):
-    deadline = time.time() + max_seconds
-    attempt = 1
-    last_errors = []
-    while time.time() < deadline and not visual_job_stop_requested():
-        if not flow.is_open and not reopen_flow_for_visual_job(flow, project_path, flow_project_url):
-            return {
-                "ok": False,
-                "browser_closed": True,
-                "flow_errors": [],
-                "blocked_prompts": [],
-            }
-
-        errors, blocked = visual_job_flow_errors(project_path, flow)
-        if errors is None:
-            if not reopen_flow_for_visual_job(flow, project_path, flow_project_url):
-                return {
-                    "ok": False,
-                    "browser_closed": True,
-                    "flow_errors": [],
-                    "blocked_prompts": [],
-                }
-            if not sleep_visual_job(5):
-                break
-            continue
-
-        last_errors = errors
-        if not errors:
-            return {"ok": True, "flow_errors": [], "blocked_prompts": blocked}
-
-        remaining = int(max(0, deadline - time.time()))
-        set_visual_job(
-            status="recovering",
-            phase="flow_recovery",
-            message=(
-                f"Flow bị chặn bởi unusual activity. Đang tải lại lần {attempt}, "
-                f"còn {remaining} giây."
-            ),
-            counts=flow_queue_status(project_path).get("counts"),
-        )
-        try:
-            flow.reload(wait_ms=30000)
-        except Exception as exc:
-            set_visual_job(
-                status="recovering",
-                phase="flow_recovery",
-                message=f"Tải lại Flow bị lỗi: {exc}. Đang thử khôi phục tab.",
-            )
-            if not reopen_flow_for_visual_job(flow, project_path, flow_project_url):
-                return {
-                    "ok": False,
-                    "browser_closed": True,
-                    "flow_errors": last_errors,
-                    "blocked_prompts": [],
-                }
-            if not sleep_visual_job(15):
-                break
-        attempt += 1
-
-    errors, blocked = visual_job_flow_errors(project_path, flow)
-    if errors:
-        last_errors = errors
-    return {"ok": False, "flow_errors": last_errors, "blocked_prompts": blocked}
-
-
-def download_submitted_for_visual_job(
-    project_path: str,
-    batch_count: int,
-    flow: FlowAutomation,
-    max_seconds: int = 300,
-    flow_project_url: str | None = None,
-):
-    deadline = time.time() + max_seconds
-    attempt = 1
-    last_result = None
-    while time.time() < deadline and not visual_job_stop_requested():
-        queue = flow_queue_status(project_path)
-        submitted_left = int(queue["counts"].get("submitted", 0))
-        if submitted_left <= 0:
-            return {"ok": True, "result": last_result, **queue}
-
-        if not flow.is_open and not reopen_flow_for_visual_job(flow, project_path, flow_project_url):
-            return {"ok": False, "reason": "browser_closed", "result": last_result, **queue}
-        if flow_project_url and not is_on_flow_project(flow, flow_project_url):
-            ensure_on_flow_project(flow, flow_project_url)
-
-        remaining = int(max(0, deadline - time.time()))
-        set_visual_job(
-            status="running",
-            phase="download",
-            message=(
-                f"Đang tải các clip đã gửi (lần thử {attempt}). "
-                f"Còn submitted: {submitted_left}."
-            ),
-            counts=queue.get("counts"),
-        )
-        try:
-            result = download_all_flow_clips(project_path, max(batch_count, submitted_left), flow=flow)
-        except Exception as exc:
-            traceback.print_exc()
-            if not reopen_flow_for_visual_job(flow, project_path, flow_project_url):
-                return {
-                    "ok": False,
-                    "reason": "browser_closed",
-                    "error": str(exc),
-                    "result": last_result,
-                    **flow_queue_status(project_path),
-                }
-            if not sleep_visual_job(5):
-                break
-            continue
-
-        last_result = result
-        set_visual_job(counts=result.get("counts"))
-
-        if result.get("flow_errors") or result.get("blocked_prompts"):
-            recovery = recover_flow_for_visual_job(project_path, flow, max_seconds=max(30, remaining), flow_project_url=flow_project_url)
-            if recovery.get("browser_closed"):
-                return {"ok": False, "reason": "browser_closed", "result": result, "recovery": recovery}
-            if not recovery["ok"]:
-                return {"ok": False, "reason": "flow_error", "result": result, "recovery": recovery}
-            attempt += 1
-            continue
-
-        new_submitted_left = int(result.get("counts", {}).get("submitted", submitted_left))
-        if new_submitted_left <= 0:
-            return {"ok": True, "result": result, **flow_queue_status(project_path)}
-
-        if new_submitted_left < submitted_left:
-            wait_seconds = min(45, max(1, deadline - time.time()))
-            if not sleep_visual_job(wait_seconds):
-                break
-            attempt += 1
-            continue
-
-        # Nothing downloaded and Flow shows no errors, so the clips are not visible in Flow.
-        # Reset submitted items to prompt_ready so automation can resend them.
-        try:
-            visible = flow.collect_visible_indexes()
-        except Exception:
-            traceback.print_exc()
-            visible = []
-        reset_visible_submitted = attempt >= 2
-        reset = reset_lost_submitted(
-            project_path,
-            visible,
-            reset_visible_submitted=reset_visible_submitted,
-            reason="stuck_in_flow_download" if reset_visible_submitted else "lost_in_flow",
-        )
-        if reset:
-            indexes_preview = ", ".join(f"#{r['index']:03d}" for r in reset[:8])
-            if len(reset) > 8:
-                indexes_preview += f" và thêm {len(reset) - 8}"
-            reset_reason = (
-                "Flow hiển thị chúng trên trang nhưng không tải được"
-                if reset_visible_submitted else
-                "Flow không hiển thị chúng trên trang"
-            )
-            set_visual_job(
-                status="running",
-                phase="download",
-                message=(
-                    f"{reset_reason}: {len(reset)} clip đã gửi trước đó "
-                    f"({indexes_preview}). Đưa chúng về prompt_ready để gửi lại."
-                ),
-                counts=flow_queue_status(project_path).get("counts"),
-            )
-            return {"ok": True, "result": result, **flow_queue_status(project_path)}
-
-        # One retry is enough here: if Flow keeps old cards without media, regenerate them.
-        wait_seconds = min(20, max(1, deadline - time.time()))
-        if not sleep_visual_job(wait_seconds):
-            break
-        attempt += 1
-
-    return {"ok": False, "reason": "timeout", "result": last_result, **flow_queue_status(project_path)}
-
-
-def pause_browser_closed(project_path: str):
-    set_visual_job(
-        status="paused",
-        phase="browser_closed",
-        finished_at=utc_now(),
-        message=(
-            "Cửa sổ Flow đã đóng trong lúc tự động hoá. "
-            "Hãy mở lại Flow rồi chạy lại chế độ tạo visual."
-        ),
-        counts=flow_queue_status(project_path).get("counts"),
-    )
-
-
-def pause_wrong_project(project_path: str, expected_url: str, current_url: str):
-    set_visual_job(
-        status="paused",
-        phase="wrong_project",
-        finished_at=utc_now(),
-        message=(
-            f"Flow đang mở sai dự án.\nURL cần mở: {expected_url}\n"
-            f"Hiện đang mở: {current_url or 'không rõ'}.\n"
-            "Hãy mở đúng dự án trong Flow, lưu URL dự án, rồi chạy lại chế độ tạo visual."
-        ),
-        counts=flow_queue_status(project_path).get("counts"),
-    )
-
-
-def run_visual_job(project_path: str, batch_count: int, flow_project_url: str | None = None):
-    visual_flow = FlowAutomation(ROOT)
-    flow_project_url = require_flow_project_url(flow_project_url) or None
-    try:
-        project = resolve_frames_project(project_path)
-        target_url = flow_project_url or FLOW_URL
-        set_visual_job(
-            status="running",
-            phase="open_flow",
-            flow_project_url=flow_project_url,
-            message=(
-                f"Đang mở dự án Flow: {flow_project_url}"
-                if flow_project_url else
-                "Đang mở Flow (chưa đặt URL dự án, sẽ làm việc trên tab hiện tại)."
-            ),
-            counts=flow_queue_status(project_path).get("counts"),
-        )
-        try:
-            visual_flow.open(project["downloads_dir"], target_url)
-        except Exception as exc:
-            traceback.print_exc()
-            set_visual_job(
-                status="paused",
-                phase="browser_closed",
-                finished_at=utc_now(),
-                message=f"Không thể mở Flow: {exc}",
-                counts=flow_queue_status(project_path).get("counts"),
-            )
-            return
-        if flow_project_url and not is_on_flow_project(visual_flow, flow_project_url):
-            ensure_on_flow_project(visual_flow, flow_project_url)
-        set_visual_job(browser=visual_flow.status())
-
-        while not visual_job_stop_requested():
-            if not visual_flow.is_open and not reopen_flow_for_visual_job(visual_flow, project_path, flow_project_url):
-                pause_browser_closed(project_path)
-                return
-            if flow_project_url and not is_on_flow_project(visual_flow, flow_project_url):
-                ensure_on_flow_project(visual_flow, flow_project_url)
-
-            queue = flow_queue_status(project_path)
-            counts = queue["counts"]
-            set_visual_job(status="running", phase="queue", counts=counts)
-
-            if counts.get("submitted", 0) > 0:
-                download_result = download_submitted_for_visual_job(
-                    project_path,
-                    batch_count,
-                    flow=visual_flow,
-                    max_seconds=300,
-                    flow_project_url=flow_project_url,
-                )
-                if download_result.get("ok"):
-                    continue
-                reason = download_result.get("reason")
-                if reason == "browser_closed":
-                    pause_browser_closed(project_path)
-                    return
-                if reason == "flow_error":
-                    set_visual_job(
-                        status="paused",
-                        phase="flow_error",
-                        finished_at=utc_now(),
-                        message=(
-                            "Flow vẫn hiển thị unusual activity sau các lần thử khôi phục. "
-                            "Tự động hoá đã được tạm dừng."
-                        ),
-                        counts=flow_queue_status(project_path).get("counts"),
-                    )
-                    return
-                set_visual_job(
-                    status="paused",
-                    phase="download_timeout",
-                    finished_at=utc_now(),
-                    message=(
-                        "Không phải tất cả clip đã gửi đều kịp sẵn sàng trong 5 phút. "
-                        "Tự động hoá tạm dừng để tránh gửi lô mới quá sớm."
-                    ),
-                    counts=flow_queue_status(project_path).get("counts"),
-                )
-                return
-
-            if counts.get("prompt_ready", 0) <= 0:
-                set_visual_job(
-                    status="completed",
-                    phase="completed",
-                    finished_at=utc_now(),
-                    message="Hoàn tất: hàng đợi không còn submitted hoặc prompt_ready.",
-                    counts=counts,
-                )
-                return
-
-            errors, blocked = visual_job_flow_errors(project_path, visual_flow)
-            if errors is None:
-                pause_browser_closed(project_path)
-                return
-            if errors:
-                recovery = recover_flow_for_visual_job(project_path, visual_flow, max_seconds=300, flow_project_url=flow_project_url)
-                if recovery.get("browser_closed"):
-                    pause_browser_closed(project_path)
-                    return
-                if not recovery["ok"]:
-                    set_visual_job(
-                        status="paused",
-                        phase="flow_error",
-                        finished_at=utc_now(),
-                        message=(
-                            "Flow unusual activity không biến mất trong 5 phút. "
-                            "Tự động hoá tạm dừng trước khi gửi lô tiếp theo."
-                        ),
-                        counts=flow_queue_status(project_path).get("counts"),
-                    )
-                    return
-
-            set_visual_job(
-                status="running",
-                phase="submit",
-                message=f"Đang gửi lô tiếp theo - tối đa {batch_count} prompt.",
-                counts=flow_queue_status(project_path).get("counts"),
-            )
-            try:
-                submit_result = submit_ready_flow_batch(
-                    project_path,
-                    batch_count,
-                    delay_seconds=2.5,
-                    flow=visual_flow,
-                )
-            except Exception as exc:
-                traceback.print_exc()
-                set_visual_job(
-                    status="paused",
-                    phase="submit",
-                    finished_at=utc_now(),
-                message=(
-                    f"Đã dừng gửi lô prompt: {exc}. "
-                    "Chưa mục nào được đánh dấu submitted; hãy kiểm tra cửa sổ Flow và chạy lại."
-                ),
-                    counts=flow_queue_status(project_path).get("counts"),
-                )
-                return
-            set_visual_job(counts=submit_result.get("counts"))
-            if submit_result.get("flow_errors") or submit_result.get("blocked_prompts"):
-                recovery = recover_flow_for_visual_job(project_path, visual_flow, max_seconds=300, flow_project_url=flow_project_url)
-                if recovery.get("browser_closed"):
-                    pause_browser_closed(project_path)
-                    return
-                if not recovery["ok"]:
-                    set_visual_job(
-                        status="paused",
-                        phase="flow_error",
-                        finished_at=utc_now(),
-                        message=(
-                            "Unusual activity xuất hiện trong lúc gửi. "
-                            "Tự động hoá tạm dừng sau cửa sổ khôi phục 5 phút."
-                        ),
-                        counts=flow_queue_status(project_path).get("counts"),
-                    )
-                    return
-
-            submitted_count = len(submit_result.get("submitted", []))
-            if submitted_count <= 0:
-                queue = flow_queue_status(project_path)
-                if queue["counts"].get("submitted", 0) <= 0 and queue["counts"].get("prompt_ready", 0) <= 0:
-                    set_visual_job(
-                        status="completed",
-                        phase="completed",
-                        finished_at=utc_now(),
-                        message="Hoàn tất: không còn gì để gửi.",
-                        counts=queue.get("counts"),
-                    )
-                    return
-                set_visual_job(
-                    status="paused",
-                    phase="submit_empty",
-                    finished_at=utc_now(),
-                    message="Flow không nhận lô prompt mới. Tự động hoá tạm dừng.",
-                    counts=queue.get("counts"),
-                )
-                return
-
-            set_visual_job(
-                status="running",
-                phase="wait_after_submit",
-                message=f"Đã gửi {submitted_count} prompt. Chờ 60 giây trước khi tải xuống.",
-                counts=submit_result.get("counts"),
-            )
-            if not sleep_visual_job(60):
-                break
-
-        set_visual_job(
-            status="stopped",
-            phase="stopped",
-            finished_at=utc_now(),
-            message="Tự động hoá đã được người dùng dừng.",
-            counts=flow_queue_status(project_path).get("counts"),
-        )
-    except Exception as exc:
-        traceback.print_exc()
-        if not visual_flow.is_open:
-            pause_browser_closed(project_path)
-        else:
-            set_visual_job(
-                status="error",
-                phase="error",
-                finished_at=utc_now(),
-                message=f"Tự động hoá bị lỗi: {exc}",
-                counts=flow_queue_status(project_path).get("counts") if project_path else None,
-            )
-    finally:
-        try:
-            visual_flow.close(close_browser=False)
-        except Exception:
-            pass
-
-
-def start_visual_job(project_path: str, batch_count: int, flow_project_url: str | None = None):
-    paths = visual_job_paths(project_path)
-    flow_project_url = require_flow_project_url(flow_project_url) or None
-    if flow_project_url:
-        save_flow_project_url(project_path, flow_project_url)
-    with VISUAL_JOB_LOCK:
-        if visual_job_has_active_thread():
-            return visual_job_snapshot()
-        try:
-            paths["stop_path"].unlink(missing_ok=True)
-        except Exception:
-            pass
-        for log_path in (paths["stdout_path"], paths["stderr_path"]):
-            try:
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                log_path.write_text("", encoding="utf-8")
-            except Exception:
-                pass
-        VISUAL_JOB.update(
-            {
-                "status": "running",
-                "phase": "starting",
-                "message": "Đang khởi động tự động hoá visual.",
-                "project_path": project_path,
-                "flow_project_url": flow_project_url,
-                "batch_count": batch_count,
-                "started_at": utc_now(),
-                "updated_at": utc_now(),
-                "finished_at": None,
-                "stop_requested": False,
-                "counts": None,
-                "process": None,
-                "status_path": paths["status_path"],
-                "stop_path": paths["stop_path"],
-                "browser": None,
-                "log": [],
-            }
-        )
-        write_visual_job_status_unlocked()
-        stdout_handle = paths["stdout_path"].open("a", encoding="utf-8")
-        stderr_handle = paths["stderr_path"].open("a", encoding="utf-8")
-        argv = [
-            sys.executable,
-            "-u",
-            str(Path(__file__).resolve()),
-            "--visual-worker",
-            project_path,
-            str(batch_count),
-            str(paths["status_path"]),
-            str(paths["stop_path"]),
-            flow_project_url or "",
-        ]
-        process = subprocess.Popen(
-            argv,
-            cwd=str(ROOT),
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-        )
-        stdout_handle.close()
-        stderr_handle.close()
-        VISUAL_JOB["process"] = process
-        write_visual_job_status_unlocked()
-        return visual_job_snapshot()
-
-
-def stop_visual_job():
-    with VISUAL_JOB_LOCK:
-        if not visual_job_has_active_thread():
-            return visual_job_snapshot()
-        VISUAL_JOB["stop_requested"] = True
-        VISUAL_JOB["status"] = "stopping"
-        VISUAL_JOB["phase"] = "stopping"
-        VISUAL_JOB["message"] = "Đang dừng tự động hoá visual sau thao tác hiện tại."
-        VISUAL_JOB["updated_at"] = utc_now()
-        stop_path = VISUAL_JOB.get("stop_path")
-        if stop_path:
-            try:
-                Path(stop_path).parent.mkdir(parents=True, exist_ok=True)
-                Path(stop_path).write_text(utc_now(), encoding="utf-8")
-            except Exception:
-                traceback.print_exc()
-        write_visual_job_status_unlocked()
-        return visual_job_snapshot()
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "FlowVeoStudio/0.1"
 
@@ -2537,26 +2146,19 @@ class Handler(BaseHTTPRequestHandler):
                     200,
                     {
                         "ok": True,
-                        "openai_key": bool(os.environ.get("OPENAI_API_KEY")),
+                        "ai": public_prompt_settings(),
+                        "project": public_project_settings(),
                         "root": str(ROOT),
                     },
                 )
                 return
 
-            if self.path == "/api/channels":
-                json_response(self, 200, {"channels": load_channels()})
+            if self.path == "/api/settings/ai":
+                json_response(self, 200, public_prompt_settings())
                 return
 
-            if self.path == "/api/library":
-                json_response(self, 200, list_library())
-                return
-
-            if self.path == "/api/flow/status":
-                json_response(self, 200, {"browser": FLOW.status()})
-                return
-
-            if self.path == "/api/flow/visual/status":
-                json_response(self, 200, visual_job_snapshot())
+            if self.path == "/api/settings/project":
+                json_response(self, 200, public_project_settings())
                 return
 
             if self.path == "/api/extension/status":
@@ -2592,18 +2194,57 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             body = self.read_body()
+            if self.path == "/api/settings/ai":
+                updates = {}
+                if "api_key" in body:
+                    api_key = str(body.get("api_key") or "").strip()
+                    updates["google_ai_api_key"] = api_key if api_key else None
+                if "model" in body:
+                    model = str(body.get("model") or "").strip()
+                    updates["google_ai_model"] = model or GOOGLE_AI_MODEL
+                if "base_url" in body:
+                    base_url = str(body.get("base_url") or "").strip().rstrip("/")
+                    updates["google_ai_base"] = base_url or GOOGLE_AI_API_BASE
+                if updates:
+                    save_prompt_settings(updates)
+                json_response(self, 200, {"ok": True, **public_prompt_settings()})
+                return
+
+            if self.path == "/api/settings/project":
+                settings = save_project_settings_from_body(body)
+                json_response(self, 200, {"ok": True, **settings})
+                return
+
             if self.path == "/api/sentences/preview":
                 project = resolve_frames_project(body["path"])
                 sentences = load_sentences(body["path"])
                 start = int(body.get("start_index", 0))
                 count = int(body.get("count", 20))
                 selected = pick_range(sentences, start, count)
+                prompts = []
+                try:
+                    prompts = load_existing_prompts(body["path"])
+                except Exception:
+                    pass
+                by_index = {int(p["index"]): p for p in prompts if "index" in p}
+                merged_selected = []
+                for item in selected:
+                    idx = int(item["index"])
+                    prompt_item = by_index.get(idx, {})
+                    merged_selected.append({
+                        "index": idx,
+                        "text": item["text"],
+                        "veo_prompt": prompt_item.get("veo_prompt") or "",
+                        "status": prompt_item.get("status") or "no_prompt",
+                        "flow_title": prompt_item.get("flow_title") or "",
+                        "flow_error": prompt_item.get("flow_error") or "",
+                    })
                 json_response(
                     self,
                     200,
                     {
                         "total": len(sentences),
-                        "items": selected,
+                        "items": merged_selected,
                         "frames_dir": str(project["frames_dir"]),
                         "sentences_path": str(project["sentences_path"]),
                         "prompts_path": str(project["prompts_path"]),
@@ -2635,11 +2276,28 @@ class Handler(BaseHTTPRequestHandler):
                 if not project_path:
                     raise ValueError("Thiếu project_path")
                 url = save_flow_project_url(project_path, body.get("flow_project_url") or body.get("url") or "")
+                configured_path = configured_frames_path()
+                if not configured_path or same_frames_path(configured_path, project_path):
+                    save_project_settings(
+                        {
+                            "frames_path": str(resolve_frames_project(project_path)["frames_dir"]),
+                            "flow_project_url": url,
+                        }
+                    )
                 json_response(self, 200, {"ok": True, "flow_project_url": url, **project_status(project_path)})
                 return
 
+            if self.path == "/api/composer/generate":
+                json_response(self, 200, generate_composer_prompts(body))
+                return
+
+            if self.path == "/api/vision/generate":
+                body["mode"] = "text_image_to_video"
+                json_response(self, 200, generate_composer_prompts(body))
+                return
+
+
             if self.path == "/api/prompts/generate":
-                channel = load_channel(body["channel_id"])
                 project_path = body.get("project_path") or body.get("sentences_path") or body.get("path")
                 project = resolve_frames_project(project_path)
                 sentences = load_sentences(project_path)
@@ -2653,18 +2311,18 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Chưa chọn đoạn kịch bản nào")
 
                 selected_context = with_neighbors(sentences, selected)
-                user_prompt = build_user_prompt(selected_context, channel, body.get("style_prompt", ""))
+                user_prompt = build_user_prompt(selected_context, body.get("style_prompt", ""))
                 system_prompt = (
                     "You create structured JSON for a production prompt pipeline. "
                     "Follow the schema exactly. Keep prompts practical for Google Veo."
                 )
-                model = body.get("model") or channel.get("default_model") or "gpt-5.4-mini"
-                raw = call_openai(model, system_prompt, user_prompt)
+                model = body.get("model") or configured_google_ai_model()
+                raw = call_google_ai_text(system_prompt, user_prompt, model)
                 generated = normalize_generated(
                     raw.get("prompts", []),
                     {item["index"]: item["text"] for item in selected},
                 )
-                project_name = body.get("project_name") or channel.get("default_project_name") or "default_project"
+                project_name = body.get("project_name") or public_project_settings().get("project_name") or "composer_project"
                 prompts_path, all_prompts = merge_project_prompts(project_path, project_name, generated)
                 status = project_status(project_path)
                 json_response(
@@ -2683,24 +2341,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-            if self.path == "/api/channel/save":
-                channel_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", body.get("id", "").strip())
-                if not channel_id:
-                    raise ValueError("Thiếu channel id")
-                body["id"] = channel_id
-                write_json(CHANNELS_DIR / f"{channel_id}.json", body)
-                json_response(self, 200, {"ok": True})
-                return
-
             if self.path == "/api/flow/queue":
                 project_path = body.get("project_path") or body.get("path")
                 if not project_path:
                     raise ValueError("Thiếu project_path")
                 json_response(self, 200, flow_queue_status(project_path))
-                return
-
-            if self.path == "/api/flow/visual/stop":
-                json_response(self, 200, stop_visual_job())
                 return
 
             if self.path == "/api/extension/start":
@@ -2719,6 +2364,13 @@ class Handler(BaseHTTPRequestHandler):
 
             if self.path == "/api/extension/stop":
                 json_response(self, 200, stop_extension_run())
+                return
+
+            if self.path == "/api/extension/auto-mode":
+                enabled = bool(body.get("auto_mode", False))
+                with EXTENSION_RUN_LOCK:
+                    EXTENSION_RUN["auto_mode"] = enabled
+                json_response(self, 200, extension_snapshot())
                 return
 
             if self.path == "/api/extension/connect":
@@ -2801,7 +2453,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def ensure_runtime_dirs() -> None:
-    CHANNELS_DIR.mkdir(parents=True, exist_ok=True)
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
     WEB_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2824,45 +2475,7 @@ def run_server(host: str = HOST, port: int = PORT) -> None:
     serve_server(server)
 
 
-def run_visual_worker_from_args(argv: list[str]) -> None:
-    if len(argv) < 6:
-        raise SystemExit("Usage: app.py --visual-worker <project_path> <batch_count> <status_path> <stop_path> [<flow_project_url>]")
-    project_path = argv[2]
-    batch_count = int(argv[3])
-    status_path = Path(argv[4])
-    stop_path = Path(argv[5])
-    flow_project_url = argv[6] if len(argv) >= 7 else ""
-    flow_project_url = require_flow_project_url(flow_project_url) or None
-    with VISUAL_JOB_LOCK:
-        VISUAL_JOB.update(
-            {
-                    "status": "running",
-                    "phase": "starting",
-                    "message": "Tiến trình visual worker đã khởi động.",
-                "project_path": project_path,
-                "flow_project_url": flow_project_url,
-                "batch_count": batch_count,
-                "started_at": utc_now(),
-                "updated_at": utc_now(),
-                "finished_at": None,
-                "stop_requested": False,
-                "counts": None,
-                "process": None,
-                "status_path": status_path,
-                "stop_path": stop_path,
-                "browser": None,
-                "log": [],
-            }
-        )
-        write_visual_job_status_unlocked()
-    run_visual_job(project_path, batch_count, flow_project_url)
-
-
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "--visual-worker":
-        run_visual_worker_from_args(sys.argv)
-        return
-
     run_server()
 
 

@@ -3,8 +3,6 @@ const FLOW_VEO_UNUSUAL_PATTERNS = [
   "We noticed some unusual activity",
   "Please visit the Help Center",
   "unusual activity",
-  "подозрительная активность",
-  "необычная активность",
   "Flow is not available in your country",
   "not available in your country",
   "reCAPTCHA",
@@ -15,11 +13,11 @@ const SUBMIT_DELAY_MIN_MS = 1000;
 const SUBMIT_DELAY_MAX_MS = 2000;
 const BATCH_WAIT_MIN_MS = 20000;
 const BATCH_WAIT_MAX_MS = 30000;
-const MAX_DOWNLOAD_PASSES = 5;
+const MAX_DOWNLOAD_PASSES = 3;
 const PASS_INTERVAL_MS = 20000;
-const PASS_MAX_MS = 300000;
-const DOWNLOAD_PARALLEL = 1;
-const ROUND_DOWNLOAD_MAX_MS = 240000;
+const PASS_MAX_MS = 180000;
+const DOWNLOAD_PARALLEL = 2;
+const ROUND_DOWNLOAD_MAX_MS = 120000;
 const ROUND_DOWNLOAD_MAX_SCROLL_STEPS = 80;
 const LOOP_STALE_SUBMIT_MS = 30000;
 
@@ -208,7 +206,7 @@ function findPromptInput() {
     .filter((item) => item.rect.width > 180 && item.rect.height > 16);
 
   const preferred = candidates
-    .filter((item) => /что вы хотите создать|what do you want to create|prompt|запрос/i.test(item.label))
+    .filter((item) => /what do you want to create|prompt|request/i.test(item.label))
     .sort((a, b) => b.rect.top - a.rect.top)[0];
   if (preferred) return preferred.el;
 
@@ -365,7 +363,7 @@ function chooseCardMedia(card, downloadEl) {
 }
 
 function isDownloadControl(el) {
-  return /download|save|export|скач|загруз/i.test([
+  return /download|save|export/i.test([
     el.innerText,
     el.textContent,
     el.getAttribute("aria-label"),
@@ -378,7 +376,7 @@ function isDownloadControl(el) {
 function cardIsErrorState(cardRoot) {
   const text = clean(cardRoot.innerText || cardRoot.textContent || "");
   // Error indicators: explicit error text, or generation stuck at low % for too long.
-  const hasErrorText = /ошибк|error|failed|не удал|unavailable/i.test(text);
+  const hasErrorText = /error|failed|unavailable/i.test(text);
   // No media found anywhere inside the card.
   const hasMedia = [...cardRoot.querySelectorAll("video, source, img")]
     .some((el) => !!mediaUrlFromElement(el));

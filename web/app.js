@@ -1,39 +1,31 @@
 const $ = (id) => document.getElementById(id);
 
-let library = { root: "", channels: [] };
 let currentPreview = [];
 let currentProjectStatus = null;
 let extensionPollTimer = null;
 let loadedFlowProjectUrl = "";
 let lastExtensionJob = null;
-let scriptLoadedPath = "";
+let lastDownloadedCount = null;
+let lastSubmittedCount = null;
+let lastReadyCount = null;
+let composerBusyTimer = null;
+let composerBusyStartedAt = 0;
+let composerBusyMessage = "";
+let generateComposerBtnText = "";
 
-const visualProviders = [
-  {
-    id: "google_flow",
-    label: "Google Flow (đang hỗ trợ)",
-    extensionMode: true,
-    description: "Dùng project Flow đang mở trong trình duyệt thường cùng tiện ích Flow Veo Studio Bridge.",
+const composerState = {
+  platform: "veo_3_1",
+  mode: "text_to_video",
+  orientation: "landscape",
+  images: [],
+};
+
+const platforms = {
+  veo_3_1: {
+    label: "Veo 3.1",
+    provider: "Google Flow",
   },
-  {
-    id: "sora",
-    label: "Sora (chuẩn bị)",
-    extensionMode: false,
-    description: "Sora là lựa chọn định hướng. Phiên bản này chưa có adapter gửi prompt/tải clip.",
-  },
-  {
-    id: "runway",
-    label: "Runway (chuẩn bị)",
-    extensionMode: false,
-    description: "Runway chưa được nối API/tự động hoá. Chọn Google Flow để chạy pipeline hiện tại.",
-  },
-  {
-    id: "pika",
-    label: "Pika (chuẩn bị)",
-    extensionMode: false,
-    description: "Pika đang ở trạng thái giữ chỗ để mở rộng sau.",
-  },
-];
+};
 
 const statusLabels = {
   idle: "Đang chờ",
@@ -50,22 +42,22 @@ const phaseLabels = {
   idle: "Đang chờ",
   waiting_for_flow_tab: "Chờ tab Flow",
   submitting: "Đang gửi prompt",
-  awaiting_download: "Chờ bắt đầu tải xuống",
+  awaiting_download: "Chờ tải xuống",
   downloading: "Đang tải xuống",
-  awaiting_regen: "Chờ quyết định tạo lại",
-  flow_error_wait: "Chờ cảnh báo Flow biến mất",
+  awaiting_regen: "Chờ tạo lại",
+  flow_error_wait: "Chờ Flow ổn định",
   wrong_project: "Sai dự án Flow",
   completed: "Hoàn tất",
   stopped: "Đã dừng",
   starting: "Đang khởi động",
   open_flow: "Đang mở Flow",
-  queue: "Đang kiểm tra hàng đợi",
+  queue: "Đang kiểm tra queue",
   download: "Đang tải xuống",
   submit: "Đang gửi prompt",
   wait_after_submit: "Chờ sau khi gửi",
   flow_recovery: "Đang khôi phục Flow",
   flow_error: "Cảnh báo Flow",
-  download_timeout: "Tải xuống quá thời gian",
+  download_timeout: "Tải quá thời gian",
   submit_empty: "Flow không nhận prompt",
   browser_closed: "Trình duyệt đã đóng",
 };
@@ -74,6 +66,15 @@ const pendingActionLabels = {
   start_download: "Bắt đầu tải xuống",
   start_regen: "Tạo lại",
   complete: "Hoàn tất",
+};
+
+const statusTexts = {
+  no_prompt: "Chưa tạo",
+  prompt_ready: "Sẵn sàng",
+  submitted: "Đang tạo",
+  downloaded: "Đã tải",
+  failed: "Lỗi",
+  other: "Khác",
 };
 
 function statusLabel(value) {
@@ -88,28 +89,6 @@ function pendingActionLabel(value) {
   return pendingActionLabels[value] || value || "";
 }
 
-function setStatus(text, isError = false) {
-  const el = $("status");
-  el.textContent = text;
-  el.classList.toggle("error", isError);
-}
-
-function disableIfExists(id, isBusy) {
-  const el = $(id);
-  if (el) el.disabled = isBusy;
-}
-
-function setBusy(isBusy) {
-  [
-    "loadScriptBtn",
-    "saveScriptBtn",
-    "previewBtn",
-    "generateAllBtn",
-    "extensionVisualBtn",
-    "extensionStopBtn",
-  ].forEach((id) => disableIfExists(id, isBusy));
-}
-
 function api(path, body) {
   return fetch(path, {
     method: body ? "POST" : "GET",
@@ -122,176 +101,243 @@ function api(path, body) {
   });
 }
 
-function flowProjectUrlKey() {
-  return `flowProjectUrl::${$("projectPath").value || ""}`;
-}
-
-function loadFlowProjectUrl() {
-  try {
-    const value = localStorage.getItem(flowProjectUrlKey()) || "";
-    $("flowProjectUrl").value = value;
-    loadedFlowProjectUrl = value;
-  } catch (err) {
-    /* ignore */
+function setStatus(text, isError = false) {
+  const el = $("status");
+  el.textContent = text || "";
+  el.classList.toggle("error", Boolean(isError));
+  if (isError && composerBusyTimer) {
+    setComposerStatus(text, true);
   }
 }
 
-function saveFlowProjectUrl(value) {
-  loadedFlowProjectUrl = value || "";
-  try {
-    localStorage.setItem(flowProjectUrlKey(), value || "");
-  } catch (err) {
-    /* ignore */
-  }
+function setComposerStatus(text, isError = false, isBusy = false) {
+  const el = $("composerStatus");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("error", Boolean(isError));
+  el.classList.toggle("busy", Boolean(isBusy));
 }
 
-async function saveFlowProjectUrlForProject(value) {
-  const url = (value || "").trim();
-  const data = await api("/api/project/flow-url", {
-    project_path: $("projectPath").value,
-    flow_project_url: url,
+function waitForPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
   });
-  if (data.flow_project_url !== undefined) {
-    const cleanUrl = data.flow_project_url || "";
-    $("flowProjectUrl").value = cleanUrl;
-    saveFlowProjectUrl(cleanUrl);
-  }
-  return data.flow_project_url || "";
 }
 
-function applySavedFlowProjectUrl(url, force = false) {
-  const cleanUrl = (url || "").trim();
-  const currentUrl = $("flowProjectUrl").value.trim();
-  if (!cleanUrl) {
-    if (force || currentUrl === loadedFlowProjectUrl) {
-      $("flowProjectUrl").value = "";
-      saveFlowProjectUrl("");
-    }
-    return;
-  }
-  if (force || !currentUrl || currentUrl === loadedFlowProjectUrl) {
-    $("flowProjectUrl").value = cleanUrl;
-    saveFlowProjectUrl(cleanUrl);
+function setGenerateComposerBusy(isBusy) {
+  const button = $("generateComposerBtn");
+  if (!button) return;
+  if (isBusy) {
+    generateComposerBtnText = generateComposerBtnText || button.textContent;
+    button.textContent = "Đang tạo...";
+    button.classList.add("is-loading");
+    button.setAttribute("aria-busy", "true");
+  } else {
+    button.textContent = generateComposerBtnText || "Tạo prompt";
+    button.classList.remove("is-loading");
+    button.removeAttribute("aria-busy");
+    generateComposerBtnText = "";
   }
 }
 
-async function ensureFlowProjectUrl() {
-  let url = $("flowProjectUrl").value.trim();
-  if (url) {
-    return await saveFlowProjectUrlForProject(url);
+function updateComposerBusyStatus() {
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - composerBusyStartedAt) / 1000));
+  setComposerStatus(`${composerBusyMessage}\nĐã chờ ${elapsedSeconds}s, request vẫn đang xử lý...`, false, true);
+}
+
+function startComposerBusy(message) {
+  composerBusyMessage = message;
+  composerBusyStartedAt = Date.now();
+  setGenerateComposerBusy(true);
+  updateComposerBusyStatus();
+  if (composerBusyTimer) clearInterval(composerBusyTimer);
+  composerBusyTimer = setInterval(updateComposerBusyStatus, 1000);
+}
+
+function stopComposerBusy() {
+  if (composerBusyTimer) clearInterval(composerBusyTimer);
+  composerBusyTimer = null;
+  composerBusyStartedAt = 0;
+  composerBusyMessage = "";
+  setGenerateComposerBusy(false);
+}
+
+function disableIfExists(id, isBusy) {
+  const el = $(id);
+  if (el) el.disabled = isBusy;
+}
+
+function setBusy(isBusy) {
+  if (!isBusy && composerBusyTimer) stopComposerBusy();
+  [
+    "generateComposerBtn",
+    "clearComposerBtn",
+    "saveSettingsBtn",
+    "settingsBtn",
+    "extensionVisualBtn",
+    "extensionStopBtn",
+  ].forEach((id) => disableIfExists(id, isBusy));
+  if (!isBusy && lastExtensionJob) renderExtensionControls(lastExtensionJob);
+}
+
+function projectPath() {
+  return $("projectPath").value.trim() || "";
+}
+
+function selectedPlatform() {
+  return platforms[composerState.platform] || platforms.veo_3_1;
+}
+
+function renderAiSettings(settings) {
+  const configured = Boolean(settings && settings.configured);
+  const model = settings?.model || "gemini-3.5-flash";
+  $("model").value = model;
+  $("aiSettingsStatus").textContent = configured
+    ? `Google AI Studio đã cấu hình (${settings.api_key_tail || "saved"}), model ${model}`
+    : "Google AI Studio chưa có API key";
+  $("health").textContent = configured ? "Google AI Studio: sẵn sàng" : "Google AI Studio: chưa cấu hình";
+  $("health").style.borderColor = configured ? "rgba(22, 163, 74, 0.65)" : "rgba(239, 68, 68, 0.65)";
+}
+
+async function refreshAiSettings() {
+  const settings = await api("/api/settings/ai");
+  renderAiSettings(settings);
+  return settings;
+}
+
+function updateFramesPathDisplay(path) {
+  $("currentFramesPath").textContent = path || "Đang xác định...";
+}
+
+function renderProjectSettings(settings) {
+  $("projectPath").value = settings.frames_path || "";
+  $("flowProjectUrl").value = settings.flow_project_url || "";
+  $("projectName").value = settings.project_name || "composer_project";
+  $("count").value = settings.prompt_batch_count || 20;
+  $("flowBatchCount").value = settings.visual_batch_count || 20;
+  loadedFlowProjectUrl = settings.flow_project_url || "";
+  updateFramesPathDisplay(settings.frames_path || "Mặc định");
+}
+
+async function refreshProjectSettings() {
+  const settings = await api("/api/settings/project");
+  renderProjectSettings(settings);
+  return settings;
+}
+
+async function saveSettings() {
+  setBusy(true);
+  try {
+    const aiPayload = { model: $("model").value.trim() || "gemini-3.5-flash" };
+    const apiKey = $("googleAiApiKey").value.trim();
+    if (apiKey) aiPayload.api_key = apiKey;
+    const aiSettings = await api("/api/settings/ai", aiPayload);
+    $("googleAiApiKey").value = "";
+    renderAiSettings(aiSettings);
+
+    const projectSettings = await api("/api/settings/project", {
+      frames_path: projectPath(),
+      flow_project_url: $("flowProjectUrl").value.trim(),
+      project_name: $("projectName").value.trim() || "composer_project",
+      prompt_batch_count: Number($("count").value || 20),
+      visual_batch_count: Number($("flowBatchCount").value || 20),
+    });
+    renderProjectSettings(projectSettings);
+
+    closeSettingsDialog();
+    if (currentPreview.length) await refreshFlowQueue();
+    setStatus("Đã lưu cài đặt.");
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    setBusy(false);
   }
-
-  const typed = window.prompt("Chưa lưu URL dự án Flow cho thư mục frames này. Hãy dán URL dự án Flow:");
-  url = (typed || "").trim();
-  if (!url) return "";
-
-  $("flowProjectUrl").value = url;
-  return await saveFlowProjectUrlForProject(url);
 }
 
-function safeProjectName(value) {
-  return (value || "default_project").replace(/[^a-zA-Z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "") || "default_project";
-}
-
-function selectedLibraryChannel() {
-  return library.channels.find((item) => item.id === $("channelFolder").value) || null;
-}
-
-function selectedSeries() {
-  const channel = selectedLibraryChannel();
-  if (!channel) return null;
-  return (channel.series || []).find((item) => item.id === $("seriesFolder").value) || null;
-}
-
-function selectedStyle() {
-  const channel = selectedLibraryChannel();
-  if (!channel) return null;
-  return (channel.styles || []).find((item) => item.id === $("channel").value) || null;
-}
-
-function selectedVisualProvider() {
-  const select = $("visualProvider");
-  if (!select) return visualProviders[0];
-  return visualProviders.find((item) => item.id === select.value) || visualProviders[0];
-}
-
-function visualProviderSupportsExtension() {
-  return Boolean(selectedVisualProvider().extensionMode);
-}
-
-function renderProviderStatus() {
-  const provider = selectedVisualProvider();
-  const status = $("providerStatus");
-  if (!status) return;
-  status.textContent = provider.description;
-  status.classList.toggle("warning", !provider.extensionMode);
-}
-
-function populateVisualProviders() {
-  const select = $("visualProvider");
-  if (!select) return;
-  select.innerHTML = "";
-  for (const provider of visualProviders) {
-    const option = document.createElement("option");
-    option.value = provider.id;
-    option.textContent = provider.label;
-    select.appendChild(option);
+function openSettingsDialog() {
+  const dialog = $("settingsDialog");
+  if (dialog.showModal) {
+    dialog.showModal();
+  } else {
+    dialog.classList.add("open");
   }
-  select.value = "google_flow";
-  renderProviderStatus();
 }
 
-function renderRows(items) {
-  const rows = $("rows");
-  rows.innerHTML = "";
-  for (const item of items) {
-    const tr = document.createElement("tr");
-    const index = String(item.index).padStart(3, "0");
-    tr.innerHTML = `
-      <td>#${index}</td>
-      <td></td>
-      <td></td>
-      <td></td>
-    `;
-    tr.children[1].textContent = item.source_text || item.text || "";
-    tr.children[2].textContent = item.flow_title || item.title_slug || "";
-    tr.children[3].textContent = item.veo_prompt || "";
-    rows.appendChild(tr);
+function closeSettingsDialog() {
+  const dialog = $("settingsDialog");
+  if (dialog.close) {
+    dialog.close();
+  } else {
+    dialog.classList.remove("open");
   }
-  $("summary").textContent = `${items.length} dòng`;
 }
 
-function renderScriptInfo(text) {
-  const count = (text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length;
-  $("scriptInfo").textContent = count
-    ? `Kịch bản hiện có ${count} đoạn.`
-    : "Bạn có thể tải kịch bản hiện có hoặc dán nội dung mới vào đây.";
-}
-
-function renderProjectStatus(status) {
-  currentProjectStatus = status;
-  const next = status.next_start_index === null ? "xong" : `#${String(status.next_start_index).padStart(3, "0")}`;
-  const counts = status.counts || {};
-  $("projectStats").textContent =
-    `Đoạn: ${status.total}. Prompt đã sẵn sàng: ${status.generated_count}. Còn lại: ${status.missing_count}. ` +
-    `Tiếp theo: ${next}. Hàng đợi: sẵn sàng ${counts.prompt_ready || 0}, đã gửi ${counts.submitted || 0}, đã tải ${counts.downloaded || 0}. ` +
-    `MP4: ${status.mp4_count || 0}.`;
+function renderQueueSummary(counts = {}, mp4Count = null) {
+  const ready = counts.prompt_ready ?? 0;
+  const submitted = counts.submitted ?? 0;
+  const downloaded = counts.downloaded ?? 0;
+  const failed = counts.failed ?? 0;
+  const mp4 = mp4Count === null || mp4Count === undefined ? "" : ` | MP4 ${mp4Count}`;
+  $("queueSummary").textContent = `Ready ${ready} | Sent ${submitted} | Done ${downloaded} | Fail ${failed}${mp4}`;
 }
 
 function renderFlowStatus(status) {
   const counts = status.counts || {};
-  const browser = status.browser || {};
-  const openText = browser.open ? "Flow đang mở" : "Flow đang đóng";
   const ready = counts.prompt_ready ?? 0;
   const submitted = counts.submitted ?? 0;
   const next = status.next_ready_index === null || status.next_ready_index === undefined
     ? "không có"
     : `#${String(status.next_ready_index).padStart(3, "0")}`;
-  $("flowStatus").textContent = `${openText}. Sẵn sàng gửi: ${ready}. Đã gửi: ${submitted}. Tiếp theo: ${next}.`;
+  $("flowStatus").textContent = `Sẵn sàng ${ready}. Đã gửi ${submitted}. Tiếp theo ${next}.`;
+  renderQueueSummary(counts, currentProjectStatus?.mp4_count);
 }
 
-function isVisualJobActive(job) {
-  return ["running", "recovering", "stopping"].includes(job.status);
+function renderRows(items) {
+  const rows = $("rows");
+  rows.innerHTML = "";
+  for (const item of items || []) {
+    const tr = document.createElement("tr");
+    const index = String(item.index ?? 0).padStart(3, "0");
+    const status = item.status || "no_prompt";
+    const platform = item.platform_label || platforms[item.platform]?.label || item.platform || "Veo";
+    tr.innerHTML = `
+      <td>#${index}</td>
+      <td><span class="badge ${status}">${statusTexts[status] || status}</span></td>
+      <td></td>
+      <td></td>
+      <td></td>
+    `;
+    tr.children[2].textContent = item.source_text || item.text || "";
+    tr.children[3].textContent = platform;
+    tr.children[4].textContent = item.veo_prompt || "";
+    if (status === "failed" && item.flow_error) {
+      const errEl = document.createElement("div");
+      errEl.className = "row-error-msg";
+      errEl.textContent = `Lỗi: ${item.flow_error}`;
+      tr.children[4].appendChild(errEl);
+    }
+    rows.appendChild(tr);
+  }
+  $("summary").textContent = `${(items || []).length} prompt`;
+}
+
+async function refreshFlowQueue() {
+  const status = await api("/api/flow/queue", { project_path: projectPath() });
+  renderFlowStatus(status);
+  return status;
+}
+
+async function refreshAllProjectState() {
+  const settings = await api("/api/settings/project");
+  renderProjectSettings(settings);
+  updateFramesPathDisplay(settings.frames_path || "Mặc định");
+  if (!settings.frames_path) {
+    $("flowStatus").textContent = "Chưa có thư mục dự án";
+    renderQueueSummary();
+    return;
+  }
+  await refreshFlowQueue().catch(() => {});
+  await refreshExtensionStatus(false).catch(() => {});
 }
 
 function isExtensionActive(job) {
@@ -327,41 +373,20 @@ function renderExtensionActions(job) {
 
 function renderExtensionControls(job) {
   const active = isExtensionActive(job);
-  const visualActive = Boolean(job.visual_job_active);
-  $("extensionVisualBtn").disabled = active || visualActive || !visualProviderSupportsExtension();
+  $("extensionVisualBtn").disabled = active;
   $("extensionStopBtn").disabled = !active;
   renderExtensionActions(job);
 }
 
 function renderExtensionStatus(job) {
   const counts = job.counts || {};
-  const connected = job.connected_at ? "tab đã kết nối" : "đang chờ tab Flow";
+  const connected = job.connected_at ? "tab đã kết nối" : "chờ tab Flow";
   const ready = counts.prompt_ready ?? 0;
   const submitted = counts.submitted ?? 0;
   const downloaded = counts.downloaded ?? 0;
-  const blocked = job.visual_job_active ? " Visual worker cũ đang hoạt động." : "";
   $("extensionStatus").textContent =
     `${statusLabel(job.status)} / ${phaseLabel(job.phase)}: ${connected}. ` +
-    `sẵn sàng ${ready}, đã gửi ${submitted}, đã tải ${downloaded}.${blocked}`;
-}
-
-function formatVisualJobStatus(job) {
-  const counts = job.counts || {};
-  const lines = [
-    `Tự động tạo hình ảnh: ${statusLabel(job.status)} - ${job.phase_label || phaseLabel(job.phase)}`,
-    job.message || "",
-  ];
-  if (job.next_action) lines.push(`Việc cần làm: ${job.next_action}`);
-  lines.push(
-    `Sẵn sàng gửi: ${counts.prompt_ready ?? 0}. ` +
-    `Đã gửi: ${counts.submitted ?? 0}. Đã tải: ${counts.downloaded ?? 0}.`
-  );
-  const log = (job.log || []).slice(-6).map((item) => `- ${item.message}`);
-  if (log.length) {
-    lines.push("Hành động gần đây:");
-    lines.push(...log);
-  }
-  return lines.filter(Boolean).join("\n");
+    `ready ${ready}, sent ${submitted}, done ${downloaded}.`;
 }
 
 function formatExtensionStatus(job) {
@@ -369,269 +394,16 @@ function formatExtensionStatus(job) {
   const lines = [
     `Tiện ích: ${statusLabel(job.status)} - ${phaseLabel(job.phase)}`,
     job.message || "",
-    `Sẵn sàng gửi: ${counts.prompt_ready ?? 0}. Đã gửi: ${counts.submitted ?? 0}. Đã tải: ${counts.downloaded ?? 0}.`,
+    `Ready: ${counts.prompt_ready ?? 0}. Sent: ${counts.submitted ?? 0}. Done: ${counts.downloaded ?? 0}.`,
   ];
   if (job.tab_url) lines.push(`Tab: ${job.tab_url}`);
-  if (job.pending_action) lines.push(`Đang chờ thao tác: ${pendingActionLabel(job.pending_action)}`);
+  if (job.pending_action) lines.push(`Đang chờ: ${pendingActionLabel(job.pending_action)}`);
   if (job.unresolved?.total) {
     lines.push(`Chưa xử lý: ${job.unresolved.total}. Có thể tạo lại: ${job.unresolved.regenerable_count ?? 0}.`);
   }
-  if (job.visual_job_active) lines.push("Visual worker cũ đang hoạt động: hãy dừng nó trước, sau đó khởi động tiện ích.");
-  const log = (job.log || []).slice(-6).map((item) => `- ${item.message}`);
-  if (log.length) {
-    lines.push("Hành động gần đây:");
-    lines.push(...log);
-  }
+  const log = (job.log || []).slice(-5).map((item) => `- ${item.message}`);
+  if (log.length) lines.push("Gần đây:", ...log);
   return lines.filter(Boolean).join("\n");
-}
-
-function formatBlockedPrompts(items) {
-  if (!items || !items.length) return "";
-  const indexes = items.map((item) => `#${String(item.index).padStart(3, "0")}`).join(", ");
-  return `\nCảnh báo unusual activity của Flow: ${indexes} đã được đưa về prompt_ready.`;
-}
-
-function applyStyle(style) {
-  if (!style) return;
-  $("model").value = style.default_model || "gpt-5.4-mini";
-  $("count").value = style.prompt_batch_size || 20;
-  $("stylePrompt").value = style.style_prompt || "";
-}
-
-function updateProjectFromSelection() {
-  const channel = selectedLibraryChannel();
-  const series = selectedSeries();
-  if (!channel) return;
-  if (series) {
-    $("projectPath").value = series.frames_path;
-    $("projectName").value = safeProjectName(`${channel.id}_${series.id}`);
-  } else {
-    $("projectPath").value = "";
-    $("projectName").value = safeProjectName(channel.id);
-  }
-  loadFlowProjectUrl();
-}
-
-function populateStyles(channel) {
-  const select = $("channel");
-  select.innerHTML = "";
-  for (const style of channel.styles || []) {
-    const option = document.createElement("option");
-    option.value = style.id;
-    option.textContent = style.name || style.id;
-    select.appendChild(option);
-  }
-  select.value = channel.default_style_id || (channel.styles && channel.styles[0] && channel.styles[0].id) || "";
-  applyStyle(selectedStyle());
-}
-
-function populateSeries(channel) {
-  const select = $("seriesFolder");
-  select.innerHTML = "";
-  for (const series of channel.series || []) {
-    const option = document.createElement("option");
-    option.value = series.id;
-    const markers = [];
-    if (series.has_frames) markers.push("frames");
-    if (series.has_sentences) markers.push("sentences");
-    option.textContent = markers.length ? `${series.name} (${markers.join(", ")})` : series.name;
-    select.appendChild(option);
-  }
-  if (!select.options.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Không tìm thấy series";
-    select.appendChild(option);
-  }
-  select.value = channel.default_series_id || (channel.series && channel.series[0] && channel.series[0].id) || "";
-}
-
-function populateChannelFolders() {
-  const select = $("channelFolder");
-  select.innerHTML = "";
-  for (const channel of library.channels || []) {
-    const option = document.createElement("option");
-    option.value = channel.id;
-    option.textContent = channel.configured ? channel.name : `${channel.name} (chưa có phong cách)`;
-    select.appendChild(option);
-  }
-  const preferred = (library.channels || []).find((item) => item.id.toLowerCase() === "erifan") || library.channels[0];
-  if (preferred) select.value = preferred.id;
-}
-
-async function refreshProjectStatus(updateStartIndex = false) {
-  const status = await api("/api/project/status", { path: $("projectPath").value });
-  renderProjectStatus(status);
-  applySavedFlowProjectUrl(status.flow_project_url);
-  if (updateStartIndex && status.next_start_index !== null) {
-    $("startIndex").value = status.next_start_index;
-  }
-  return status;
-}
-
-async function refreshFlowQueue() {
-  const status = await api("/api/flow/queue", { project_path: $("projectPath").value });
-  renderFlowStatus(status);
-  return status;
-}
-
-async function loadScriptEditor(showStatus = true) {
-  const data = await api("/api/sentences/load", { project_path: $("projectPath").value });
-  $("scriptEditor").value = data.script_text || "";
-  scriptLoadedPath = data.sentences_path || "";
-  renderScriptInfo($("scriptEditor").value);
-  if (showStatus) {
-    setStatus(
-      data.exists
-        ? `Đã tải kịch bản từ: ${data.sentences_path}`
-        : "Chưa có sentences.json trong thư mục frames. Hãy dán kịch bản rồi bấm Lưu kịch bản."
-    );
-  }
-  return data;
-}
-
-async function saveScriptEditor() {
-  setBusy(true);
-  try {
-    const data = await api("/api/sentences/save", {
-      project_path: $("projectPath").value,
-      script_text: $("scriptEditor").value,
-    });
-    $("scriptEditor").value = data.script_text || "";
-    scriptLoadedPath = data.sentences_path || "";
-    renderScriptInfo($("scriptEditor").value);
-    await refreshProjectStatus(true).catch((err) => setStatus(err.message, true));
-    await refreshFlowQueue().catch(() => {});
-    setStatus(
-      `Đã lưu kịch bản: ${data.sentences_path}\n` +
-      `Tổng số đoạn: ${data.total}.` +
-      (data.backup_path ? `\nBackup file cũ: ${data.backup_path}` : "")
-    );
-  } catch (err) {
-    setStatus(err.message, true);
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function selectChannelFolder(refresh = true) {
-  const channel = selectedLibraryChannel();
-  if (!channel) return;
-  populateStyles(channel);
-  populateSeries(channel);
-  updateProjectFromSelection();
-  if (refresh) {
-    await refreshProjectStatus(true).catch((err) => setStatus(err.message, true));
-    await loadScriptEditor(false).catch(() => {
-      $("scriptEditor").value = "";
-      renderScriptInfo("");
-    });
-    await refreshFlowQueue().catch(() => {});
-    await refreshVisualJobStatus(false).catch(() => {});
-    await refreshExtensionStatus(false).catch(() => {});
-  }
-}
-
-async function loadInitial() {
-  const health = await api("/api/health");
-  $("health").textContent = health.openai_key ? "Đã tìm thấy OPENAI_API_KEY" : "Không tìm thấy OPENAI_API_KEY";
-  $("health").style.borderColor = health.openai_key ? "#9bc7aa" : "#d89b93";
-
-  populateVisualProviders();
-  library = await api("/api/library");
-  $("libraryRoot").textContent = library.root || "";
-  populateChannelFolders();
-  await selectChannelFolder(false);
-  await refreshProjectStatus(true).catch((err) => setStatus(err.message, true));
-  await loadScriptEditor(false).catch(() => {
-    $("scriptEditor").value = "";
-    renderScriptInfo("");
-  });
-  await refreshFlowQueue().catch(() => {});
-  await refreshVisualJobStatus(false).catch(() => {});
-  await refreshExtensionStatus(false).catch(() => {});
-}
-
-async function preview() {
-  setStatus("Đang đọc sentences.json...");
-  const data = await api("/api/sentences/preview", {
-    path: $("projectPath").value,
-    start_index: Number($("startIndex").value),
-    count: Number($("count").value),
-  });
-  currentPreview = data.items;
-  renderRows(currentPreview);
-  const status = await refreshProjectStatus(false);
-  const counts = status.counts || {};
-  setStatus(
-    `Đã đọc tệp: ${data.sentences_path}\n` +
-    `Prompt được lưu tại: ${data.prompts_path}\n` +
-    `Clip được lưu tại: ${data.clips_dir}\n` +
-    `Đoạn: ${data.total}. Đang hiển thị: ${data.items.length}.\n` +
-    `Trạng thái: sẵn sàng ${counts.prompt_ready || 0}, đã gửi ${counts.submitted || 0}, đã tải ${counts.downloaded || 0}, lỗi ${counts.failed || 0}. MP4: ${status.mp4_count || 0}.`
-  );
-}
-
-async function generateAllPrompts() {
-  setBusy(true);
-  const batchSize = Math.max(1, Math.min(80, Number($("count").value || 20)));
-  const allGenerated = [];
-  try {
-    let status = await refreshProjectStatus(true);
-    if (status.next_start_index === null) {
-      setStatus("Tất cả prompt cho sentences.json này đã sẵn sàng.");
-      return;
-    }
-
-    let batchNumber = 1;
-    while (status.next_start_index !== null) {
-      const startIndex = status.next_start_index;
-      const totalBatches = Math.ceil(status.missing_count / batchSize);
-      setStatus(
-        `Đang tạo tất cả prompt: lô ${batchNumber}/${totalBatches}, bắt đầu từ #${String(startIndex).padStart(3, "0")}.\n` +
-        `OpenAI API được gọi theo từng phần ${batchSize}. Còn lại trước lô này: ${status.missing_count}.`
-      );
-
-      const data = await api("/api/prompts/generate", {
-        channel_id: $("channel").value || $("channelFolder").value,
-        model: $("model").value,
-        project_path: $("projectPath").value,
-        project_name: $("projectName").value,
-        start_index: startIndex,
-        count: batchSize,
-        missing_only: true,
-        style_prompt: $("stylePrompt").value,
-      });
-
-      allGenerated.push(...data.generated);
-      renderRows(data.prompts || allGenerated);
-      await refreshFlowQueue().catch(() => {});
-      status = await refreshProjectStatus(true);
-      batchNumber += 1;
-    }
-
-    setStatus(
-      `Xong. Đã tạo prompt mới: ${allGenerated.length}.\n` +
-      `Tất cả prompt đã được lưu trong veo_prompts.json bên trong thư mục frames đã chọn.`
-    );
-  } catch (err) {
-    setStatus(err.message, true);
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function refreshVisualJobStatus(writeStatus = false) {
-  const job = await api("/api/flow/visual/status");
-  if (job.counts) {
-    renderFlowStatus({ browser: job.browser || {}, counts: job.counts });
-  } else {
-    await refreshFlowQueue().catch(() => {});
-  }
-  if (writeStatus) {
-    setStatus(formatVisualJobStatus(job), job.status === "error" || job.status === "paused");
-  }
-  return job;
 }
 
 function startExtensionPolling() {
@@ -651,8 +423,17 @@ async function refreshExtensionStatus(writeStatus = false) {
   renderExtensionControls(job);
   renderExtensionStatus(job);
   if (job.counts) {
-    renderFlowStatus({ browser: {}, counts: job.counts, next_ready_index: job.next_ready_index });
+    renderFlowStatus({ counts: job.counts, next_ready_index: job.next_ready_index });
+    const ready = job.counts.prompt_ready ?? 0;
+    const submitted = job.counts.submitted ?? 0;
+    const downloaded = job.counts.downloaded ?? 0;
+    if (ready !== lastReadyCount || submitted !== lastSubmittedCount || downloaded !== lastDownloadedCount) {
+      lastReadyCount = ready;
+      lastSubmittedCount = submitted;
+      lastDownloadedCount = downloaded;
+    }
   }
+  $("autoModeCheckbox").checked = Boolean(job.auto_mode);
   if (writeStatus) {
     setStatus(formatExtensionStatus(job), job.status === "error" || job.status === "paused");
   }
@@ -681,42 +462,26 @@ async function runExtensionPhaseAction(action) {
 
 async function startExtensionGeneration() {
   setBusy(true);
-  const count = Number($("flowBatchCount").value || 20);
   try {
-    const provider = selectedVisualProvider();
-    if (!provider.extensionMode) {
-      setStatus(`${provider.label} chưa được tích hợp tự động. Hãy chọn Google Flow để chạy pipeline hiện tại.`, true);
-      return;
+    let flowProjectUrl = $("flowProjectUrl").value.trim();
+    if (!flowProjectUrl) {
+      const typed = window.prompt("Dán URL dự án Flow:");
+      flowProjectUrl = (typed || "").trim();
+      if (!flowProjectUrl) {
+        setStatus("Hãy lưu URL dự án Flow trước.", true);
+        return;
+      }
+      $("flowProjectUrl").value = flowProjectUrl;
     }
 
-    const currentVisualJob = await refreshVisualJobStatus(false);
-    if (isVisualJobActive(currentVisualJob)) {
-      setStatus(
-        `${formatVisualJobStatus(currentVisualJob)}\n\nHãy dừng visual worker cũ trước, sau đó khởi động chế độ tiện ích.`,
-        true
-      );
-      return;
-    }
-
-    let projectUrl = $("flowProjectUrl").value.trim();
-    if (!projectUrl) {
-      projectUrl = await ensureFlowProjectUrl();
-    }
-    if (!projectUrl) {
-      setStatus("Trước tiên hãy mở đúng dự án trong Flow và lưu URL.", true);
-      return;
-    }
-    projectUrl = await saveFlowProjectUrlForProject(projectUrl);
     const job = await api("/api/extension/start", {
-      project_path: $("projectPath").value,
-      count,
-      flow_project_url: projectUrl,
+      project_path: projectPath(),
+      count: Number($("flowBatchCount").value || 20),
+      flow_project_url: flowProjectUrl,
     });
     renderExtensionControls(job);
     renderExtensionStatus(job);
-    setStatus(
-      `${formatExtensionStatus(job)}\n\nHãy mở dự án Flow này trong trình duyệt thường có cài tiện ích. Tiện ích sẽ tự nhận phiên chạy.`
-    );
+    setStatus(formatExtensionStatus(job));
     startExtensionPolling();
   } catch (err) {
     setStatus(err.message, true);
@@ -727,7 +492,7 @@ async function startExtensionGeneration() {
 }
 
 async function stopExtensionGeneration() {
-  setStatus("Đang dừng chế độ tiện ích sau thao tác hiện tại...");
+  setStatus("Đang dừng tiện ích sau thao tác hiện tại...");
   try {
     const job = await api("/api/extension/stop", {});
     renderExtensionControls(job);
@@ -739,58 +504,184 @@ async function stopExtensionGeneration() {
   }
 }
 
-$("channelFolder").addEventListener("change", () => {
-  selectChannelFolder(true);
-});
+function setSegmentValue(containerId, dataKey, value) {
+  const container = $(containerId);
+  for (const button of container.querySelectorAll("button")) {
+    const active = button.dataset[dataKey] === value;
+    button.classList.toggle("active", active);
+  }
+}
 
-$("seriesFolder").addEventListener("change", () => {
-  updateProjectFromSelection();
-  loadScriptEditor(false).catch(() => {
-    $("scriptEditor").value = "";
-    renderScriptInfo("");
-  });
-  refreshProjectStatus(true).catch((err) => setStatus(err.message, true));
-  refreshFlowQueue().catch(() => {});
-  refreshExtensionStatus(false).catch(() => {});
-});
-
-$("channel").addEventListener("change", () => {
-  applyStyle(selectedStyle());
-});
-
-$("visualProvider").addEventListener("change", () => {
-  renderProviderStatus();
+function renderComposerState() {
+  setSegmentValue("modeButtons", "mode", composerState.mode);
+  setSegmentValue("orientationButtons", "orientation", composerState.orientation);
+  $("platformStatus").textContent = selectedPlatform().label;
+  $("providerStatus").textContent = selectedPlatform().provider;
+  const imageMode = composerState.mode === "text_image_to_video";
+  $("imageDropzone").classList.toggle("is-hidden", !imageMode);
+  $("imageList").classList.toggle("is-hidden", !imageMode);
+  $("promptInput").placeholder = imageMode
+    ? "Optional: add motion, mood, or details to combine with the image..."
+    : "Describe the video idea. AI will expand it into a Veo prompt...";
   if (lastExtensionJob) renderExtensionControls(lastExtensionJob);
-});
+}
 
-$("projectPath").addEventListener("change", () => {
-  loadFlowProjectUrl();
-  loadScriptEditor(false).catch(() => {
-    $("scriptEditor").value = "";
-    renderScriptInfo("");
+function setupSegmentedControls() {
+  $("modeButtons").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-mode]");
+    if (!button) return;
+    composerState.mode = button.dataset.mode;
+    renderComposerState();
   });
-  refreshProjectStatus(true).catch((err) => setStatus(err.message, true));
-  refreshFlowQueue().catch(() => {});
-  refreshExtensionStatus(false).catch(() => {});
+
+  $("orientationButtons").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-orientation]");
+    if (!button) return;
+    composerState.orientation = button.dataset.orientation;
+    renderComposerState();
+  });
+}
+
+function setupImageDropzone() {
+  const dropzone = $("imageDropzone");
+  const input = $("imageInput");
+
+  dropzone.addEventListener("click", () => input.click());
+  dropzone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropzone.classList.add("dragging");
+  });
+  dropzone.addEventListener("dragleave", () => {
+    dropzone.classList.remove("dragging");
+  });
+  dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragging");
+    handleImageFiles(Array.from(event.dataTransfer.files || []));
+  });
+  input.addEventListener("change", (event) => {
+    handleImageFiles(Array.from(event.target.files || []));
+    input.value = "";
+  });
+}
+
+function handleImageFiles(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      composerState.images.push({
+        filename: file.name,
+        base64: event.target.result,
+      });
+      renderImages();
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function renderImages() {
+  const list = $("imageList");
+  list.innerHTML = "";
+  composerState.images.forEach((image, index) => {
+    const item = document.createElement("div");
+    item.className = "image-thumb";
+
+    const img = document.createElement("img");
+    img.src = image.base64;
+    img.alt = image.filename || `image ${index + 1}`;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "x";
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      composerState.images.splice(index, 1);
+      renderImages();
+    });
+
+    item.appendChild(img);
+    item.appendChild(remove);
+    list.appendChild(item);
+  });
+}
+
+async function generateComposerPrompt() {
+  const prompt = $("promptInput").value.trim();
+  if (!prompt && composerState.mode === "text_to_video") {
+    setComposerStatus("Hãy nhập prompt trước.", true);
+    setStatus("Hãy nhập prompt trước.", true);
+    return;
+  }
+  if (composerState.mode === "text_image_to_video" && composerState.images.length === 0) {
+    setComposerStatus("Hãy chọn ít nhất một hình ảnh.", true);
+    setStatus("Hãy chọn ít nhất một hình ảnh.", true);
+    return;
+  }
+
+  setBusy(true);
+  setStatus(composerState.mode === "text_image_to_video" ? "Đang phân tích ảnh và tạo prompt..." : "Đang tạo prompt...");
+  const busyMessage = composerState.mode === "text_image_to_video" ? "Đang phân tích ảnh và tạo prompt..." : "Đang tạo prompt...";
+  setStatus(busyMessage);
+  startComposerBusy(busyMessage);
+  try {
+    await waitForPaint();
+    const data = await api("/api/composer/generate", {
+      project_path: projectPath(),
+      project_name: $("projectName").value || "composer_project",
+      platform: composerState.platform,
+      mode: composerState.mode,
+      orientation: composerState.orientation,
+      model: $("model").value || "",
+      prompt,
+      images: composerState.mode === "text_image_to_video" ? composerState.images : [],
+    });
+    currentPreview = data.prompts || data.generated || [];
+    renderRows(currentPreview);
+    await refreshFlowQueue().catch(() => {});
+    const generatedCount = (data.generated || currentPreview || []).length;
+    const doneMessage = `Đã tạo ${generatedCount} prompt.\nLưu tại: ${data.saved_to}`;
+    setComposerStatus(doneMessage);
+    setTimeout(() => setStatus(doneMessage), 0);
+    setStatus(`Đã tạo ${data.generated.length} prompt.\nLưu tại: ${data.saved_to}`);
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function clearComposer() {
+  $("promptInput").value = "";
+  composerState.images = [];
+  renderImages();
+}
+
+async function loadInitial() {
+  renderComposerState();
+
+  await api("/api/health");
+  await refreshAiSettings();
+  await refreshProjectSettings();
+  await refreshAllProjectState();
+}
+
+$("autoModeCheckbox").addEventListener("change", async () => {
+  try {
+    await api("/api/extension/auto-mode", { auto_mode: $("autoModeCheckbox").checked });
+  } catch (err) {
+    setStatus(err.message, true);
+  }
 });
 
-$("flowProjectUrl").addEventListener("change", () => {
-  saveFlowProjectUrlForProject($("flowProjectUrl").value.trim()).catch((err) => setStatus(err.message, true));
-});
-
-$("scriptEditor").addEventListener("input", () => {
-  renderScriptInfo($("scriptEditor").value);
-});
-
-$("previewBtn").addEventListener("click", () => {
-  preview().catch((err) => setStatus(err.message, true));
-});
-$("loadScriptBtn").addEventListener("click", () => {
-  loadScriptEditor(true).catch((err) => setStatus(err.message, true));
-});
-$("saveScriptBtn").addEventListener("click", saveScriptEditor);
-$("generateAllBtn").addEventListener("click", generateAllPrompts);
+$("generateComposerBtn").addEventListener("click", generateComposerPrompt);
+$("clearComposerBtn").addEventListener("click", clearComposer);
+$("settingsBtn").addEventListener("click", openSettingsDialog);
+$("closeSettingsBtn").addEventListener("click", closeSettingsDialog);
+$("saveSettingsBtn").addEventListener("click", saveSettings);
 $("extensionVisualBtn").addEventListener("click", startExtensionGeneration);
 $("extensionStopBtn").addEventListener("click", stopExtensionGeneration);
 
+setupSegmentedControls();
+setupImageDropzone();
 loadInitial().catch((err) => setStatus(err.message, true));

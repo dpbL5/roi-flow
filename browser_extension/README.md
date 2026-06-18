@@ -1,10 +1,10 @@
 # Flow Veo Studio Bridge
 
-Tiện ích trình duyệt dạng unpacked để chạy tự động hoá Flow trong profile trình duyệt thường của người dùng. Thiết lập hiện đang hoạt động là Yandex Browser.
+Tiện ích trình duyệt dạng unpacked để chạy tự động hoá Flow trong profile trình duyệt thường của người dùng. Thiết lập hiện đang hoạt động là Chromium-based browser.
 
 Phiên bản hiện tại: `0.2.2`.
 
-## Cài đặt hoặc cập nhật trong Yandex Browser
+## Cài đặt hoặc cập nhật trong Chromium-based browser
 
 1. Mở `browser://extensions`.
 2. Bật chế độ nhà phát triển.
@@ -38,3 +38,4 @@ Phiên bản hiện tại: `0.2.2`.
 - Phiên bản `0.2.2` tách phiên chạy thành các pha thủ công: gửi toàn bộ prompt sẵn sàng trước, chờ nút popup để bắt đầu tải xuống, chạy tối đa 5 lượt tải, rồi chờ thao tác tạo lại hoặc hoàn tất. Tạo lại bị giới hạn bởi `FLOW_EXTENSION_REGEN_MAX` (mặc định `2`) thông qua `regen_count` trên từng prompt.
 - Khi bắt đầu, server local đưa các prompt bị failed nhầm bởi logic auto-fail đã retired (`not_downloaded_after_cycle_*`, `final_not_generated`, `final_retry_exhausted`) về lại `prompt_ready`.
 - Server local từ chối hash SHA256 MP4 trùng chính xác và chuyển tệp trùng vào `_flow_veo_studio\duplicate_downloads`.
+

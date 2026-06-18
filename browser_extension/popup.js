@@ -88,6 +88,7 @@ async function loadStatus() {
     el.textContent = [
       `Trạng thái: ${statusLabel(data.status)}`,
       `Pha: ${phaseLabel(data.phase)}`,
+      data.auto_mode ? "Chế độ: Tự động chuyển pha" : "Chế độ: Thủ công",
       data.message || "",
       `sẵn sàng: ${counts.prompt_ready ?? 0}, đã gửi: ${counts.submitted ?? 0}, đã tải: ${counts.downloaded ?? 0}`,
       data.project_path ? `frames: ${data.project_path}` : "Chưa chọn dự án trong UI local.",

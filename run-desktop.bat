@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-python desktop.py
+.venv\Scripts\python desktop.py
 
 if errorlevel 1 pause
 endlocal

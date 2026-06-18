@@ -8,148 +8,146 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
+      <div class="brand">
         <h1>Flow Veo Studio</h1>
-        <p>Chuẩn bị prompt Veo và điều phối quá trình tạo video bằng nhà cung cấp visual</p>
+        <p id="activeProjectLabel">Soạn prompt → Tạo video</p>
       </div>
-      <div id="health" class="health">Đang kiểm tra...</div>
+      <div class="topbar-status">
+        <div id="queueSummary" class="health">Queue: -</div>
+        <div id="health" class="health">Đang kiểm tra...</div>
+        <button id="settingsBtn" type="button">Cài đặt</button>
+      </div>
     </header>
 
-    <main class="layout">
-      <section class="panel settings">
-        <div class="section-title">
-          <h2>Dự án</h2>
-          <span id="libraryRoot"></span>
+    <dialog id="settingsDialog" class="settings-dialog">
+      <form id="settingsForm" class="settings-modal" method="dialog">
+        <div class="settings-head">
+          <h2>Cài đặt</h2>
+          <button id="closeSettingsBtn" type="button">Đóng</button>
         </div>
 
-        <div class="section-block">
-          <div class="section-heading">
-            <h3>1. Chọn nội dung</h3>
-            <p>Chọn kênh và series, app sẽ tự trỏ tới thư mục frames tương ứng.</p>
+        <div class="settings-body">
+          <label>
+            Thư mục lưu dự án
+            <input id="projectPath" placeholder="Để trống dùng thư mục mặc định" />
+          </label>
+
+          <label>
+            URL dự án Flow
+            <input id="flowProjectUrl" type="text" placeholder="https://labs.google/fx/tools/flow/project/..." />
+          </label>
+
+          <div id="aiSettingsStatus" class="stats">API key chưa được cấu hình</div>
+
+          <label>
+            Google AI Studio API key
+            <input id="googleAiApiKey" type="password" autocomplete="off" placeholder="Dán API key từ Google AI Studio" />
+          </label>
+
+          <div class="row two">
+            <label>
+              Model
+              <input id="model" value="gemini-3.5-flash" />
+            </label>
+            <label>
+              Tên dự án
+              <input id="projectName" value="composer_project" />
+            </label>
           </div>
 
           <div class="row two">
             <label>
-              Kênh
-              <select id="channelFolder"></select>
+              Lô prompt
+              <input id="count" type="number" value="20" min="1" max="80" />
             </label>
             <label>
-              Series
-              <select id="seriesFolder"></select>
-            </label>
-          </div>
-
-          <label>
-            Thư mục frames
-            <input id="projectPath" value="D:\MyChannelsIRL\erifan\18\frames" />
-          </label>
-
-          <div id="projectStats" class="stats">Chưa kiểm tra trạng thái dự án</div>
-        </div>
-
-        <div class="section-block">
-          <div class="section-heading">
-            <h3>2. Chuẩn bị prompt</h3>
-            <p>Soạn kịch bản ngay trong app, sau đó kiểm tra và tạo các prompt còn thiếu.</p>
-          </div>
-
-          <div class="script-editor">
-            <div class="script-toolbar">
-              <button id="loadScriptBtn">Tải kịch bản</button>
-              <button id="saveScriptBtn">Lưu kịch bản</button>
-            </div>
-            <label>
-              Kịch bản
-              <textarea id="scriptEditor" rows="8" placeholder="Mỗi dòng là một đoạn kịch bản. Khi lưu, app sẽ tự tạo sentences.json trong thư mục frames."></textarea>
-            </label>
-            <div id="scriptInfo" class="mini-info">Bạn có thể tải kịch bản hiện có hoặc dán nội dung mới vào đây.</div>
-          </div>
-
-          <div class="actions main-actions">
-            <button id="previewBtn">Kiểm tra kịch bản</button>
-            <button id="generateAllBtn" class="primary">Tạo tất cả prompt</button>
-          </div>
-        </div>
-
-        <div class="section-block">
-          <div class="section-heading">
-            <h3>3. Tạo video</h3>
-            <p>Google Flow đang là nhà cung cấp hoạt động. Các nhà cung cấp khác được chuẩn bị cho bước mở rộng sau.</p>
-          </div>
-
-          <label>
-            Nhà cung cấp visual
-            <select id="visualProvider"></select>
-          </label>
-          <div id="providerStatus" class="provider-status"></div>
-
-          <div class="flow-box">
-            <div>
-              <strong>Google Flow</strong>
-              <span id="flowStatus">Trình duyệt Flow chưa được mở</span>
-            </div>
-            <label class="inline-field flow-url-field">
-              URL dự án Flow
-              <input id="flowProjectUrl" type="text" placeholder="https://labs.google/fx/tools/flow/project/..." />
-            </label>
-            <div class="extension-panel">
-              <div>
-                <strong>Tiện ích Flow</strong>
-                <span id="extensionStatus">Tiện ích chưa kết nối</span>
-              </div>
-              <button id="extensionVisualBtn" class="primary">Tạo qua tiện ích</button>
-              <button id="extensionStopBtn">Dừng tiện ích</button>
-              <div id="extensionActions" class="extension-actions"></div>
-            </div>
-          </div>
-
-          <div class="hint">
-            Trước khi tạo video, hãy mở đúng dự án trong Flow và lưu URL. Tiện ích sẽ gửi tất cả prompt trước, sau đó chờ bạn khởi động bước tải xuống thủ công.
-          </div>
-        </div>
-
-        <details class="advanced-panel">
-          <summary>Thiết lập nâng cao</summary>
-          <div class="advanced-content">
-            <div class="row two">
-              <label>
-                Phong cách kênh
-                <select id="channel"></select>
-              </label>
-              <label>
-                Mô hình prompt
-                <input id="model" value="gpt-5.4-mini" />
-              </label>
-            </div>
-
-            <div class="row three compact-row">
-              <label>
-                Tên dự án
-                <input id="projectName" value="erifan_18" />
-              </label>
-              <label>
-                Từ chỉ mục
-                <input id="startIndex" type="number" value="0" min="0" />
-              </label>
-              <label>
-                Lô prompt
-                <input id="count" type="number" value="20" min="1" max="80" />
-              </label>
-            </div>
-
-            <label>
-              Giới hạn lô visual
+              Lô visual
               <input id="flowBatchCount" type="number" value="20" min="1" max="300" />
             </label>
-
-            <label>
-              Prompt phong cách
-              <textarea id="stylePrompt" rows="13"></textarea>
-            </label>
           </div>
-        </details>
+        </div>
 
-        <pre id="status" class="status"></pre>
+        <div class="settings-actions">
+          <button id="saveSettingsBtn" class="primary" type="button">Lưu cài đặt</button>
+        </div>
+      </form>
+    </dialog>
+
+    <main class="studio-shell">
+      <section class="panel composer-panel">
+        <div class="panel-head">
+          <h2>Tạo prompt</h2>
+          <span id="platformStatus">Veo 3.1</span>
+        </div>
+
+        <div class="panel-body composer-body">
+          <div class="row two">
+            <div class="control-group">
+              <span class="control-label">Chế độ</span>
+              <div id="modeButtons" class="segmented">
+                <button type="button" class="active" data-mode="text_to_video">Text To Video</button>
+                <button type="button" data-mode="text_image_to_video">Text + Image</button>
+              </div>
+            </div>
+
+            <div class="control-group">
+              <span class="control-label">Khung hình</span>
+              <div id="orientationButtons" class="segmented">
+                <button type="button" class="active" data-orientation="landscape">Ngang 16:9</button>
+                <button type="button" data-orientation="portrait">Dọc 9:16</button>
+              </div>
+            </div>
+          </div>
+
+          <label class="prompt-field">
+            Nội dung video
+            <textarea id="promptInput" rows="8" placeholder="Mô tả ý tưởng video...&#10;&#10;Mỗi dòng là một prompt riêng biệt."></textarea>
+          </label>
+
+          <div id="imageDropzone" class="dropzone">
+            <span>Thả ảnh hoặc bấm để chọn</span>
+            <input id="imageInput" type="file" multiple accept="image/png, image/jpeg, image/webp" />
+          </div>
+          <div id="imageList" class="image-list"></div>
+
+          <div class="actions">
+            <button id="generateComposerBtn" class="primary" type="button">Tạo prompt</button>
+            <button id="clearComposerBtn" type="button">Xóa nhập liệu</button>
+          </div>
+          <div id="composerStatus" class="composer-status" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="panel run-panel">
+        <div class="panel-head">
+          <h2>Xuất video</h2>
+          <span id="providerStatus">Google Flow</span>
+        </div>
+
+        <div class="panel-body run-body">
+          <div class="flow-stack">
+            <div id="flowStatus" class="status-card">Flow chưa sẵn sàng</div>
+            <div id="extensionStatus" class="status-card">Tiện ích chưa kết nối</div>
+          </div>
+
+          <div class="summary-block" style="padding-bottom:0;border-bottom:none">
+            <span>Thư mục lưu video</span>
+            <strong id="currentFramesPath">Đang xác định...</strong>
+          </div>
+
+          <label class="toggle-label">
+            <input type="checkbox" id="autoModeCheckbox" checked />
+            Tự động chuyển pha
+          </label>
+
+          <div class="actions two-actions">
+            <button id="extensionVisualBtn" class="primary" type="button">Chạy qua tiện ích</button>
+            <button id="extensionStopBtn" type="button">Dừng</button>
+          </div>
+          <div id="extensionActions" class="extension-actions"></div>
+
+          <pre id="status" class="status"></pre>
+        </div>
       </section>
 
       <section class="panel results">
@@ -161,10 +159,11 @@
           <table>
             <thead>
               <tr>
-                <th>Chỉ mục</th>
-                <th>Văn bản gốc</th>
-                <th>Tiêu đề</th>
-                <th>Veo Prompt</th>
+                <th>#</th>
+                <th>Trạng thái</th>
+                <th>Nguồn</th>
+                <th>Platform</th>
+                <th>Prompt</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>

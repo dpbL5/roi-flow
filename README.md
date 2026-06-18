@@ -23,25 +23,16 @@ Hoặc dùng giao diện web:
 run.bat
 ```
 
-Thư viện nội dung mặc định:
+## Luồng thao tác chính
 
-```text
-D:\MyChannelsIRL
-```
-
-Luồng thao tác chính:
-
-1. Chọn kênh nội dung.
-2. Chọn series, app sẽ tự trỏ tới thư mục `<channel>\<series>\frames`.
-3. Soạn, tải hoặc lưu kịch bản ngay trong giao diện.
-4. Bấm `Kiểm tra kịch bản`.
-5. Bấm `Tạo tất cả prompt` khi muốn sinh prompt.
-6. Chọn provider tạo video. Hiện Google Flow là provider hoạt động chính; Sora, Runway và Pika đang là lựa chọn chờ tích hợp.
-7. Dán và lưu URL project Google Flow.
-8. Mở project đó trong trình duyệt đã cài extension.
-9. Bấm `Tạo qua extension`.
-10. Khi app báo sẵn sàng tải, bấm `Bắt đầu tải`.
-11. Nếu còn prompt chưa tải xong, chọn `Tạo lại N` hoặc `Hoàn tất`.
+1. Nhập mô tả video vào ô **Nội dung video** (mỗi dòng là một prompt riêng biệt).
+2. Chọn chế độ **Text To Video** hoặc **Text + Image**.
+3. Dán Google AI Studio API key trong **Cài đặt**.
+4. Bấm **Tạo prompt** — AI sẽ sinh prompt Veo từ nội dung bạn nhập.
+5. Dán URL dự án Google Flow trong **Cài đặt**.
+6. Mở Flow project đó trong trình duyệt đã cài extension.
+7. Bấm **Chạy qua tiện ích** — extension sẽ gửi prompt và tải video về.
+8. Khi có prompt chưa tải xong, chọn **Tạo lại N** hoặc **Hoàn tất**.
 
 Trước khi khởi động visual mode, luôn kiểm tra không có worker khác đang chạy:
 
@@ -203,7 +194,7 @@ Extension nằm tại:
 browser_extension
 ```
 
-Cách cài trong Yandex Browser hoặc trình duyệt Chromium tương thích:
+Cách cài trong trình duyệt Chromium tương thích:
 
 1. Mở trang extension của trình duyệt.
 2. Bật developer mode.
@@ -223,53 +214,46 @@ Extension mode hiện là đường chính để tạo video:
 
 Không dùng lại logic cũ kiểu "nút download thứ N ứng với media thứ N". Flow DOM có thể đổi thứ tự. Extension phải tìm media trong card gần nhất có đúng một marker `#NNN`.
 
-## Provider Video
+## Google Flow Video Output
 
-Giao diện đã có selector provider:
+Google Flow is the only active video provider in this project. The data contract stays the same:
 
-- Google Flow: đang hoạt động qua browser extension.
-- Sora: placeholder, chưa có adapter.
-- Runway: placeholder, chưa có adapter.
-- Pika: placeholder, chưa có adapter.
-
-Khi thêm provider mới, nên giữ hợp đồng dữ liệu hiện tại:
-
-- input chính là `veo_prompts.json`;
-- trạng thái prompt vẫn dùng `prompt_ready`, `submitted`, `downloaded`, `failed`;
-- output cuối cùng vẫn là `<frames>\clip_####.mp4`;
-- service files vẫn đặt trong `<frames>\_flow_veo_studio`.
+- main input is `veo_prompts.json`;
+- prompt states use `prompt_ready`, `submitted`, `downloaded`, `failed`;
+- final output is `<frames>\clip_####.mp4`;
+- service files stay in `<frames>\_flow_veo_studio`;
+- browser extension mode handles submit, scan, and download.
 
 ## API Chính
 
-Health và thư viện:
+Health, settings, and library:
 
 ```text
 GET /api/health
+GET /api/settings/ai
+POST /api/settings/ai
 GET /api/channels
 GET /api/library
 GET /api/flow/status
 ```
 
-Project và prompt:
+Project and prompt:
 
 ```text
 POST /api/sentences/preview
 POST /api/sentences/load
 POST /api/sentences/save
 POST /api/project/status
+POST /api/project/flow-url
+POST /api/composer/generate
 POST /api/prompts/generate
 POST /api/channel/save
 ```
 
-Queue:
+Queue and extension:
 
 ```text
 POST /api/flow/queue
-```
-
-Extension:
-
-```text
 GET  /api/extension/status
 GET  /api/extension/unresolved
 POST /api/extension/start
@@ -284,35 +268,15 @@ POST /api/extension/download-media
 POST /api/extension/flow-error
 ```
 
-Worker legacy chỉ để kiểm tra hoặc dừng trạng thái cũ:
-
-```text
-GET  /api/flow/visual/status
-POST /api/flow/visual/stop
-```
-
-Các endpoint Chrome/CDP cũ đã retired và trả `410 Gone`:
-
-```text
-POST /api/flow/open
-POST /api/flow/current-url
-POST /api/flow/submit-batch
-POST /api/flow/scan
-POST /api/flow/download-visible
-POST /api/flow/download-all
-POST /api/flow/visual/start
-```
-
 ## File Quan Trọng
 
-- `app.py`: HTTP API, scan thư viện, queue, sinh prompt, điều phối extension.
-- `desktop.py`: launcher PyWebView.
-- `run-desktop.bat`: mở desktop GUI.
-- `run.bat`: chạy server và web UI.
-- `web\index.html`, `web\app.js`, `web\styles.css`: giao diện người dùng.
-- `browser_extension\manifest.json`, `content.js`, `background.js`, `popup.html`, `popup.js`: bridge với Google Flow.
-- `channels\*.json`: style theo kênh, không hardcode trong Python.
-- `src\flow_automation.py`: Playwright/CDP legacy, giữ để tham khảo, không dùng làm luồng chính.
+- `app.py`: HTTP API, library scan, Google AI Studio prompt generation, queue state, and browser-extension orchestration.
+- `desktop.py`: PyWebView launcher.
+- `run-desktop.bat`: opens the desktop GUI.
+- `run.bat`: starts the server and web UI.
+- `web\index.html`, `web\app.js`, `web\styles.css`: user interface.
+- `browser_extension\manifest.json`, `content.js`, `background.js`, `popup.html`, `popup.js`: bridge with Google Flow.
+- `channels\*.json`: channel styles; keep style text out of Python.
 
 ## Kiểm Tra Kỹ Thuật
 
@@ -323,13 +287,7 @@ node --check browser_extension\content.js
 node --check browser_extension\popup.js
 ```
 
-OpenAI API key phải nằm trong Windows environment variable:
-
-```text
-OPENAI_API_KEY
-```
-
-Không commit API key vào repository.
+Google AI Studio API key is saved from the local UI to the user app-data folder and is not returned to the browser after saving. Do not commit API keys to the repository.
 
 ## Ghi Chú Phát Triển
 
@@ -338,4 +296,5 @@ Không commit API key vào repository.
 - Khi chọn series, project path vẫn là thư mục `frames`, không phải đường dẫn trực tiếp tới `sentences.json`.
 - Không khôi phục Chrome/CDP visual path làm luồng chính.
 - Nếu sửa extension, cần reload extension trong trình duyệt và refresh Flow tab.
-- Các chuỗi tiếng Nga hoặc tiếng Anh còn lại trong code thường là selector/detection text của Google Flow, không nên dịch nếu chúng dùng để nhận diện UI ngoài.
+
+
